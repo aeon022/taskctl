@@ -2,6 +2,12 @@ package models
 
 import "time"
 
+// ListEntry is a reminder list with its account name.
+type ListEntry struct {
+	Name    string
+	Account string
+}
+
 type Task struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`

@@ -49,6 +49,11 @@ func (s *Store) migrate() error {
 			deleted_at TEXT NOT NULL,
 			PRIMARY KEY (title, list)
 		);
+		CREATE TABLE IF NOT EXISTS lists (
+			name    TEXT NOT NULL,
+			account TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (name, account)
+		);
 		CREATE TABLE IF NOT EXISTS pending_status (
 			title      TEXT NOT NULL,
 			list       TEXT NOT NULL,
@@ -208,6 +213,42 @@ func (s *Store) DeleteByID(ctx context.Context, id string) error {
 func (s *Store) DeleteBySource(ctx context.Context, source string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM tasks WHERE source = ?`, source)
 	return err
+}
+
+func (s *Store) StoreListEntries(ctx context.Context, entries []models.ListEntry) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lists`); err != nil {
+		tx.Rollback()
+		return err
+	}
+	for _, e := range entries {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR REPLACE INTO lists (name, account) VALUES (?,?)`, e.Name, e.Account); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetListEntries(ctx context.Context) ([]models.ListEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, account FROM lists ORDER BY name, account`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []models.ListEntry
+	for rows.Next() {
+		var e models.ListEntry
+		if err := rows.Scan(&e.Name, &e.Account); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
 }
 
 func (s *Store) AddPendingDelete(ctx context.Context, t *models.Task) error {

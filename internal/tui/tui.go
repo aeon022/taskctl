@@ -63,7 +63,7 @@ type statsMsg struct {
 	today, week, total int
 	daily              []int
 }
-type listNamesMsg struct{ entries []reminders.ListEntry }
+type listNamesMsg struct{ entries []models.ListEntry }
 type batchDoneMsg struct{ err error }
 type batchDeletedMsg struct{ count int; err error }
 type tickMsg time.Time
@@ -115,7 +115,7 @@ type Model struct {
 	inputIdx      int
 	submitting    bool
 	editTarget    *models.Task
-	listEntries   []reminders.ListEntry
+	listEntries   []models.ListEntry
 	listPickerIdx int
 	// delete confirm
 	deleteTarget *models.Task
@@ -147,7 +147,7 @@ func newModel() Model {
 // ── Init / Update / View ──────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadTasks(m.showDone), loadAllListNamesCmd())
+	return tea.Batch(loadTasks(m.showDone), loadCachedListEntriesCmd(), loadAllListNamesCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1228,21 +1228,40 @@ func startOfDay(t time.Time) time.Time {
 	return time.Date(y, mo, d, 0, 0, 0, 0, t.Location())
 }
 
-func loadAllListNamesCmd() tea.Cmd {
+func loadCachedListEntriesCmd() tea.Cmd {
 	return func() tea.Msg {
-		entries, _ := reminders.ListListsWithAccounts()
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return listNamesMsg{}
+		}
+		defer s.Close()
+		entries, _ := s.GetListEntries(context.Background())
 		return listNamesMsg{entries}
 	}
 }
 
-// uniqueListEntries builds list entries from loaded tasks (no account info yet).
-func uniqueListEntries(tasks []models.Task) []reminders.ListEntry {
+func loadAllListNamesCmd() tea.Cmd {
+	return func() tea.Msg {
+		entries, _ := reminders.ListListsWithAccounts()
+		// persist to SQLite cache so next startup is instant
+		if len(entries) > 0 {
+			if s, err := store.New(config.DBPath()); err == nil {
+				_ = s.StoreListEntries(context.Background(), entries)
+				s.Close()
+			}
+		}
+		return listNamesMsg{entries}
+	}
+}
+
+// uniqueListEntries builds list entries from loaded tasks (no account info).
+func uniqueListEntries(tasks []models.Task) []models.ListEntry {
 	seen := make(map[string]bool)
-	var out []reminders.ListEntry
+	var out []models.ListEntry
 	for _, t := range tasks {
 		if t.List != "" && !seen[t.List] {
 			seen[t.List] = true
-			out = append(out, reminders.ListEntry{Name: t.List})
+			out = append(out, models.ListEntry{Name: t.List})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

@@ -112,12 +112,6 @@ func fetchViaEventKit(listName string) ([]models.Task, error) {
 	return parseTasks(strings.TrimSpace(string(out))), nil
 }
 
-// ListEntry holds a reminder list name together with its account name.
-type ListEntry struct {
-	Name    string
-	Account string
-}
-
 // ListLists returns all reminder list names (without account info).
 func ListLists() ([]string, error) {
 	entries, err := ListListsWithAccounts()
@@ -132,7 +126,7 @@ func ListLists() ([]string, error) {
 }
 
 // ListListsWithAccounts returns all reminder lists with their account names.
-func ListListsWithAccounts() ([]ListEntry, error) {
+func ListListsWithAccounts() ([]models.ListEntry, error) {
 	script := `
 tell application "Reminders"
 	set output to ""
@@ -148,14 +142,14 @@ end tell`
 	if err != nil {
 		return nil, err
 	}
-	var entries []ListEntry
+	var entries []models.ListEntry
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		parts := strings.SplitN(line, "|", 2)
-		e := ListEntry{Name: strings.TrimSpace(parts[0])}
+		e := models.ListEntry{Name: strings.TrimSpace(parts[0])}
 		if len(parts) == 2 {
 			e.Account = strings.TrimSpace(parts[1])
 		}
