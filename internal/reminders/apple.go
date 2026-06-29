@@ -153,14 +153,19 @@ func CreateTask(t *models.Task) error {
 	if t.Notes != "" {
 		notesLine = fmt.Sprintf(`set body of newTask to "%s"`, escapeAS(t.Notes))
 	}
+	prioLine := ""
+	if t.Priority > 0 {
+		prioLine = fmt.Sprintf(`set priority of newTask to %d`, t.Priority)
+	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
 	set theList to list "%s"
 	set newTask to make new reminder in theList with properties {name:"%s"}
 	%s
 	%s
+	%s
 end tell
-`, escapeAS(listName), escapeAS(t.Title), dueLine, notesLine)
+`, escapeAS(listName), escapeAS(t.Title), dueLine, notesLine, prioLine)
 	_, err := runAppleScript(script)
 	return err
 }
@@ -332,7 +337,12 @@ func parseTasks(raw string) []models.Task {
 					}
 				}
 			case "PRIORITY":
-				fmt.Sscanf(val, "%d", &t.Priority)
+				var p int
+				fmt.Sscanf(val, "%d", &p)
+				// only map Apple's high(1) and medium(5); ignore low(9) and none(0)
+				if p == 1 || p == 5 {
+					t.Priority = p
+				}
 			case "COMPLETED":
 				if val != "" {
 					c, err := time.Parse(time.RFC3339, val)
