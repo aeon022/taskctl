@@ -236,6 +236,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case " ":
 		if t := cursorTask(m); t != nil {
+			// flip status immediately for visual feedback, then sync in background
+			if t.Done() {
+				t.Status = "needsAction"
+			} else {
+				t.Status = "completed"
+			}
+			m.rows = buildRows(m.tasks)
 			return m, toggleDoneCmd(t)
 		}
 
@@ -491,13 +498,18 @@ func deleteTaskCmd(t *models.Task) tea.Cmd {
 	}
 }
 
+// toggleDoneCmd receives t with Status already flipped (by the space handler).
+// It calls the matching AppleScript and persists to SQLite.
 func toggleDoneCmd(t *models.Task) tea.Cmd {
+	// capture desired state before the goroutine runs
+	wantDone := t.Done()
+	taskCopy := *t
 	return func() tea.Msg {
 		var err error
-		if t.Done() {
-			err = reminders.UncompleteTask(t)
+		if wantDone {
+			err = reminders.CompleteTask(&taskCopy)
 		} else {
-			err = reminders.CompleteTask(t)
+			err = reminders.UncompleteTask(&taskCopy)
 		}
 		if err != nil {
 			return taskSavedMsg{err}
@@ -505,12 +517,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 		s, sErr := store.New(config.DBPath())
 		if sErr == nil {
 			defer s.Close()
-			newStatus := "completed"
-			if t.Done() {
-				newStatus = "needsAction"
-			}
-			t.Status = newStatus
-			_ = s.UpsertTask(context.Background(), t)
+			_ = s.UpsertTask(context.Background(), &taskCopy)
 		}
 		return taskSavedMsg{}
 	}
