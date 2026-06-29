@@ -231,16 +231,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case listNamesMsg:
 		if len(msg.entries) > 0 {
-			// merge: keep existing entries, add new ones (e.g. empty lists from async load)
-			seen := make(map[string]bool)
-			for _, e := range m.listEntries {
-				seen[e.Name+"|"+e.Account] = true
-			}
-			for _, e := range msg.entries {
-				if !seen[e.Name+"|"+e.Account] {
-					m.listEntries = append(m.listEntries, e)
-				}
-			}
+			// replace entirely — async load has account info and empty lists;
+			// merging would show "Erinnerungen" + "Erinnerungen (iCloud)" as duplicates
+			m.listEntries = msg.entries
 			sort.Slice(m.listEntries, func(i, j int) bool {
 				if m.listEntries[i].Name != m.listEntries[j].Name {
 					return m.listEntries[i].Name < m.listEntries[j].Name
@@ -853,11 +846,14 @@ func loadTasks(showDone bool) tea.Cmd {
 			return tasksLoadedMsg{}
 		}
 		defer s.Close()
+		ctx := context.Background()
+		// remove taskctl shadows that now have an apple counterpart
+		_ = s.RemoveShadowedLocal(ctx)
 		status := "needsAction"
 		if showDone {
 			status = ""
 		}
-		tasks, _ := s.ListTasks(context.Background(), store.ListFilter{Status: status})
+		tasks, _ := s.ListTasks(ctx, store.ListFilter{Status: status})
 		return tasksLoadedMsg{tasks}
 	}
 }
