@@ -63,7 +63,7 @@ type statsMsg struct {
 	today, week, total int
 	daily              []int
 }
-type listNamesMsg struct{ names []string }
+type listNamesMsg struct{ entries []reminders.ListEntry }
 type batchDoneMsg struct{ err error }
 type batchDeletedMsg struct{ count int; err error }
 type tickMsg time.Time
@@ -111,11 +111,11 @@ type Model struct {
 	width    int
 	height   int
 	// form
-	inputs       [fCount]textinput.Model
-	inputIdx     int
-	submitting   bool
-	editTarget   *models.Task
-	listNames    []string
+	inputs        [fCount]textinput.Model
+	inputIdx      int
+	submitting    bool
+	editTarget    *models.Task
+	listEntries   []reminders.ListEntry
 	listPickerIdx int
 	// delete confirm
 	deleteTarget *models.Task
@@ -230,18 +230,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case listNamesMsg:
-		if len(msg.names) > 0 {
-			// merge: keep existing names, add any new ones (e.g. empty lists)
+		if len(msg.entries) > 0 {
+			// merge: keep existing entries, add new ones (e.g. empty lists from async load)
 			seen := make(map[string]bool)
-			for _, n := range m.listNames {
-				seen[n] = true
+			for _, e := range m.listEntries {
+				seen[e.Name+"|"+e.Account] = true
 			}
-			for _, n := range msg.names {
-				if !seen[n] {
-					m.listNames = append(m.listNames, n)
+			for _, e := range msg.entries {
+				if !seen[e.Name+"|"+e.Account] {
+					m.listEntries = append(m.listEntries, e)
 				}
 			}
-			sort.Strings(m.listNames)
+			sort.Slice(m.listEntries, func(i, j int) bool {
+				if m.listEntries[i].Name != m.listEntries[j].Name {
+					return m.listEntries[i].Name < m.listEntries[j].Name
+				}
+				return m.listEntries[i].Account < m.listEntries[j].Account
+			})
 		}
 
 	case statsMsg:
@@ -283,19 +288,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	// ── create/edit form ──────────────────────────────────────────────────
 	if m.view == viewCreate {
-		// list picker: ↑/↓ navigate the full list (no filtering — avoids circular dependency)
-		if m.inputIdx == fList && len(m.listNames) > 0 {
+		// list picker: ↑/↓ navigate all entries; input gets just the list name
+		if m.inputIdx == fList && len(m.listEntries) > 0 {
 			switch msg.String() {
 			case "up":
 				if m.listPickerIdx > 0 {
 					m.listPickerIdx--
-					m.inputs[fList].SetValue(m.listNames[m.listPickerIdx])
+					m.inputs[fList].SetValue(m.listEntries[m.listPickerIdx].Name)
 				}
 				return m, nil
 			case "down":
-				if m.listPickerIdx < len(m.listNames)-1 {
+				if m.listPickerIdx < len(m.listEntries)-1 {
 					m.listPickerIdx++
-					m.inputs[fList].SetValue(m.listNames[m.listPickerIdx])
+					m.inputs[fList].SetValue(m.listEntries[m.listPickerIdx].Name)
 				}
 				return m, nil
 			}
@@ -515,7 +520,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, loadStats()
 
 	case "n":
-		m.listNames = uniqueListNames(m.tasks) // immediate from cache
+		m.listEntries = uniqueListEntries(m.tasks)
 		m.view = viewCreate
 		m.inputs = newFormInputs("")
 		m.editTarget = nil
@@ -525,7 +530,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "e":
 		if t := cursorTask(m); t != nil {
-			m.listNames = uniqueListNames(m.tasks)
+			m.listEntries = uniqueListEntries(m.tasks)
 			m.view = viewCreate
 			m.inputs = prefillForm(t)
 			m.editTarget = t
@@ -695,26 +700,35 @@ func (m Model) renderForm() string {
 	for i, inp := range m.inputs {
 		inner.WriteString(styleLabel.Render(formLabels[i]) + "  " + inp.View() + "\n")
 		// show list picker below the List field when focused
-		if i == fList && m.inputIdx == fList && len(m.listNames) > 0 {
-			const pickerHeight = 5
+		if i == fList && m.inputIdx == fList && len(m.listEntries) > 0 {
+			const pickerHeight = 6
 			start := m.listPickerIdx - 2
 			if start < 0 {
 				start = 0
 			}
 			end := start + pickerHeight
-			if end > len(m.listNames) {
-				end = len(m.listNames)
+			if end > len(m.listEntries) {
+				end = len(m.listEntries)
 				start = end - pickerHeight
 				if start < 0 {
 					start = 0
 				}
 			}
 			for j := start; j < end; j++ {
-				name := m.listNames[j]
+				e := m.listEntries[j]
+				label := e.Name
+				if e.Account != "" {
+					label += styleSubhead.Render(" ("+e.Account+")")
+				}
 				if j == m.listPickerIdx {
-					inner.WriteString(strings.Repeat(" ", 30) + styleKey.Render("▶ ") + styleKey.Render(name) + "\n")
+					inner.WriteString(strings.Repeat(" ", 30) + styleKey.Render("▶ ") + styleKey.Render(e.Name) + styleSubhead.Render(func() string {
+						if e.Account != "" {
+							return " (" + e.Account + ")"
+						}
+						return ""
+					}()) + "\n")
 				} else {
-					inner.WriteString(strings.Repeat(" ", 30) + styleSubhead.Render("  "+name) + "\n")
+					inner.WriteString(strings.Repeat(" ", 30) + styleSubhead.Render("  "+label) + "\n")
 				}
 			}
 		}
@@ -1216,21 +1230,22 @@ func startOfDay(t time.Time) time.Time {
 
 func loadAllListNamesCmd() tea.Cmd {
 	return func() tea.Msg {
-		names, _ := reminders.ListLists()
-		return listNamesMsg{names}
+		entries, _ := reminders.ListListsWithAccounts()
+		return listNamesMsg{entries}
 	}
 }
 
-func uniqueListNames(tasks []models.Task) []string {
+// uniqueListEntries builds list entries from loaded tasks (no account info yet).
+func uniqueListEntries(tasks []models.Task) []reminders.ListEntry {
 	seen := make(map[string]bool)
-	var out []string
+	var out []reminders.ListEntry
 	for _, t := range tasks {
 		if t.List != "" && !seen[t.List] {
 			seen[t.List] = true
-			out = append(out, t.List)
+			out = append(out, reminders.ListEntry{Name: t.List})
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

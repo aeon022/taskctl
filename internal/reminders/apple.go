@@ -112,30 +112,56 @@ func fetchViaEventKit(listName string) ([]models.Task, error) {
 	return parseTasks(strings.TrimSpace(string(out))), nil
 }
 
-// ListLists returns all reminder list names.
+// ListEntry holds a reminder list name together with its account name.
+type ListEntry struct {
+	Name    string
+	Account string
+}
+
+// ListLists returns all reminder list names (without account info).
 func ListLists() ([]string, error) {
+	entries, err := ListListsWithAccounts()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.Name
+	}
+	return out, nil
+}
+
+// ListListsWithAccounts returns all reminder lists with their account names.
+func ListListsWithAccounts() ([]ListEntry, error) {
 	script := `
 tell application "Reminders"
-	set names to {}
+	set output to ""
 	repeat with a in accounts
+		set aName to name of a
 		repeat with l in lists of a
-			set end of names to name of l
+			set output to output & (name of l) & "|" & aName & linefeed
 		end repeat
 	end repeat
-	return names
+	return output
 end tell`
 	out, err := runAppleScript(script)
 	if err != nil {
 		return nil, err
 	}
-	var lists []string
-	for _, name := range strings.Split(out, ", ") {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			lists = append(lists, name)
+	var entries []ListEntry
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
+		parts := strings.SplitN(line, "|", 2)
+		e := ListEntry{Name: strings.TrimSpace(parts[0])}
+		if len(parts) == 2 {
+			e.Account = strings.TrimSpace(parts[1])
+		}
+		entries = append(entries, e)
 	}
-	return lists, nil
+	return entries, nil
 }
 
 // CreateTask creates a new reminder in Apple Reminders.
