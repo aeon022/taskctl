@@ -1,35 +1,140 @@
-# taskctl — Tasks from Terminal
+# taskctl
 
-Manage tasks across Apple Reminders, Google Tasks, and Microsoft To Do.
-Go rewrite of the utask Python prototype — single binary, faster, MCP-ready.
+Local-first task manager for macOS. Syncs with Apple Reminders via EventKit — iCloud, Exchange/Office365, and Google accounts all work. Single Go binary, TUI + CLI, MCP-ready.
+
+---
+
+## Install
 
 ```bash
-taskctl list --json                          # All tasks
-taskctl today --json                         # Today's tasks for daily briefing
-taskctl add "Call dentist" --due 2026-10-15  # Add task
-taskctl done <id>                            # Complete task
-taskctl sync                                 # Sync all providers
-taskctl mcp                                  # Run as MCP server
+./setup.sh
 ```
 
-## Config
+Builds the binary and installs it to `~/.local/bin/taskctl`. Also registers the MCP server in `~/.claude.json`.
 
-```yaml
-# ~/.config/taskctl/config.yaml
-providers:
-  - name: apple-reminders
-    list: Personal
-  - name: google-tasks
-    list: Work
-default_provider: apple-reminders
+---
+
+## TUI
+
+```bash
+taskctl
 ```
 
-## Relationship to utask
+| Key | Action |
+|-----|--------|
+| `n` | New task |
+| `e` | Edit task |
+| `d` | Delete task (confirm with `y`) |
+| `space` | Toggle done (task stays greyed-out, disappears on next sync) |
+| `s` | Sync with Apple Reminders |
+| `S` | Postpone to tomorrow |
+| `u` | Undo last delete |
+| `p` | Start Pomodoro (25 min) |
+| `t` | Focus mode — only today & overdue |
+| `v` | Batch select (space toggle, A all, enter done, d delete) |
+| `/` | Search |
+| `i` | Stats (completions, sparkline) |
+| `c` | Toggle show completed |
+| `q` | Quit |
 
-`utask` (Python) in `/Projects/TaskSync` is the prototype.
-`taskctl` is the clean Go rewrite — same concept, better architecture.
+### New/Edit task form
 
-## Status
+| Field | Notes |
+|-------|-------|
+| Title | `!! Titel` = urgent (red), `! Titel` = important (yellow) |
+| List | Dropdown with all Reminders lists + account name in `()` |
+| Due | NLP: `morgen`, `übermorgen`, `nächsten montag`, `in 3 tagen`, `2026-07-15` |
+| Notes | Free text |
+| Repeat | `daily` / `weekly` / `monthly` — spawns next task on completion |
 
-Planned — see [ROADMAP.md](../ROADMAP.md) for timeline.
-Tech stack: Go, Cobra, EventKit (Apple Reminders), Google Tasks API, Microsoft Graph API
+`tab` / `enter` — next field · `ctrl+s` — save · `esc` — cancel
+
+---
+
+## CLI
+
+```bash
+# Sync from Apple Reminders
+taskctl sync
+
+# List all tasks
+taskctl list
+taskctl list --json
+
+# Tasks due today / this week
+taskctl today
+taskctl week
+
+# Add a task
+taskctl add "Zahnarzt anrufen" --list Aufgaben --due 2026-07-15
+
+# Complete a task by ID
+taskctl done <id>
+
+# List all reminder lists
+taskctl lists
+
+# Run as MCP server (stdio)
+taskctl mcp
+```
+
+---
+
+## How sync works
+
+- **Read**: EventKit Swift script fetches all reminders from all accounts (fast, native API)
+- **Write**: AppleScript searches all accounts for the matching list/task (Create, Complete, Delete, Postpone)
+- **Local cache**: SQLite at `~/Library/Application Support/taskctl/taskctl.db`
+- **Conflict resolution**: local status changes (done, delete) are protected by `pending_status` / `pending_deletes` tables — a sync cannot revert them until Apple Reminders confirms the change
+
+### Sync flow
+1. `taskctl sync` or `s` in TUI
+2. Fetches all Apple Reminders via EventKit
+3. Filters out tasks in `pending_deletes` (user deleted locally)
+4. Applies `pending_status` overrides (user toggled done locally)
+5. Removes taskctl-sourced duplicates that now have a confirmed Apple counterpart
+
+---
+
+## MCP tools
+
+When running as MCP server (`taskctl mcp`), Claude can:
+
+| Tool | Description |
+|------|-------------|
+| `list_tasks` | List tasks, optionally filtered by list or status |
+| `create_task` | Create a task with title, list, due date, notes |
+| `complete_task` | Mark a task as completed |
+| `delete_task` | Delete a task |
+| `sync_tasks` | Trigger a sync from Apple Reminders |
+
+---
+
+## Architecture
+
+```
+taskctl/
+├── cmd/            # Cobra CLI commands (add, sync, today, week, lists, mcp…)
+├── internal/
+│   ├── models/     # Task, ListEntry types
+│   ├── reminders/  # Apple Reminders bridge (Swift EventKit + AppleScript)
+│   ├── store/      # SQLite cache (tasks, lists, pending_deletes, pending_status)
+│   ├── nlpdate/    # German/English NLP date parser
+│   ├── config/     # DB path, defaults
+│   ├── tui/        # Bubbletea TUI
+│   └── mcpserver/  # MCP server (mark3labs/mcp-go)
+└── setup.sh        # Build + install + MCP registration
+```
+
+**Stack**: Go · Cobra · Bubbletea · Lipgloss · modernc/sqlite · mcp-go
+
+---
+
+## Roadmap
+
+### v0.2
+- Google Tasks provider
+- Background daemon (`taskctl daemon`) for periodic sync + notifications
+
+### v0.3
+- Microsoft To Do / Graph API
