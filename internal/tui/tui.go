@@ -182,15 +182,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case taskDeletedMsg:
 		m.deleteTarget = nil
-		if msg.err != nil {
-			m.err = msg.err
-		} else {
-			if msg.task != nil {
-				m.lastDeleted = msg.task
-			}
-			m.err = nil
-			return m, loadTasks(m.showDone)
+		if msg.task != nil {
+			m.lastDeleted = msg.task
 		}
+		if msg.err != nil {
+			// Reminders delete failed (e.g. non-iCloud list) — show warning
+			// but still reload since we removed from local cache
+			m.err = fmt.Errorf("removed locally (Reminders: %v)", msg.err)
+		} else {
+			m.err = nil
+		}
+		return m, loadTasks(m.showDone)
 
 	case postponeMsg:
 		if msg.err != nil {
@@ -856,16 +858,18 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 
 func deleteTaskCmd(t *models.Task) tea.Cmd {
 	return func() tea.Msg {
+		// always delete from local cache, even if Reminders delete fails
+		var remErr error
 		if err := reminders.DeleteTask(t); err != nil {
-			return taskDeletedMsg{err: err}
+			remErr = err
 		}
 		s, err := store.New(config.DBPath())
-		if err != nil {
-			return taskDeletedMsg{task: t}
+		if err == nil {
+			defer s.Close()
+			_ = s.DeleteByID(context.Background(), t.ID)
 		}
-		defer s.Close()
-		_ = s.DeleteByID(context.Background(), t.ID)
-		return taskDeletedMsg{task: t}
+		// pass remErr so the UI can show a warning, but reload happens regardless
+		return taskDeletedMsg{task: t, err: remErr}
 	}
 }
 
@@ -969,15 +973,16 @@ func batchCompleteCmd(tasks []*models.Task) tea.Cmd {
 
 func batchDeleteCmd(tasks []*models.Task) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
-		if err != nil {
-			return batchDeletedMsg{err: err}
+		s, _ := store.New(config.DBPath())
+		if s != nil {
+			defer s.Close()
 		}
-		defer s.Close()
 		ctx := context.Background()
 		for _, t := range tasks {
 			_ = reminders.DeleteTask(t)
-			_ = s.DeleteByID(ctx, t.ID)
+			if s != nil {
+				_ = s.DeleteByID(ctx, t.ID)
+			}
 		}
 		return batchDeletedMsg{count: len(tasks)}
 	}
