@@ -283,13 +283,21 @@ func (s *Store) PrunePendingDeletes(ctx context.Context) error {
 }
 
 // RemoveShadowedLocal deletes taskctl-created tasks that now have an apple
-// counterpart with the same title+list, meaning the background sync succeeded.
+// counterpart synced AFTER the local task was created — meaning the background
+// CreateTask goroutine succeeded and the sync confirmed it.
+// We compare created_at so a pre-existing apple task (older than our local one)
+// does NOT cause the new local task to be deleted.
 func (s *Store) RemoveShadowedLocal(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM tasks
 		WHERE source = 'taskctl'
-		  AND (title || '|' || list) IN (
-		      SELECT title || '|' || list FROM tasks WHERE source = 'apple'
+		  AND id IN (
+		      SELECT tc.id
+		      FROM tasks tc
+		      JOIN tasks ap
+		        ON tc.title = ap.title AND tc.list = ap.list
+		       AND ap.source = 'apple'
+		       AND ap.created_at >= tc.created_at
 		  )
 	`)
 	return err
