@@ -62,6 +62,7 @@ type statsMsg struct {
 	today, week, total int
 	daily              []int
 }
+type listNamesMsg struct{ names []string }
 type batchDoneMsg struct{ err error }
 type batchDeletedMsg struct{ count int; err error }
 type tickMsg time.Time
@@ -223,6 +224,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.err = nil
 			return m, loadTasks(m.showDone)
+		}
+
+	case listNamesMsg:
+		if len(msg.names) > 0 {
+			// merge: keep existing names, add any new ones (e.g. empty lists)
+			seen := make(map[string]bool)
+			for _, n := range m.listNames {
+				seen[n] = true
+			}
+			for _, n := range msg.names {
+				if !seen[n] {
+					m.listNames = append(m.listNames, n)
+				}
+			}
+			sort.Strings(m.listNames)
 		}
 
 	case statsMsg:
@@ -488,13 +504,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, loadStats()
 
 	case "n":
-		m.listNames = uniqueListNames(m.tasks)
+		m.listNames = uniqueListNames(m.tasks) // immediate from cache
 		m.view = viewCreate
 		m.inputs = newFormInputs("")
 		m.editTarget = nil
 		m.inputIdx = 0
 		m.listPickerIdx = 0
-		return m, m.inputs[fTitle].Focus()
+		return m, tea.Batch(m.inputs[fTitle].Focus(), loadAllListNamesCmd())
 
 	case "e":
 		if t := cursorTask(m); t != nil {
@@ -504,7 +520,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.editTarget = t
 			m.inputIdx = 0
 			m.listPickerIdx = 0
-			return m, m.inputs[fTitle].Focus()
+			return m, tea.Batch(m.inputs[fTitle].Focus(), loadAllListNamesCmd())
 		}
 
 	case "d":
@@ -1175,6 +1191,13 @@ func prefillForm(t *models.Task) [fCount]textinput.Model {
 func startOfDay(t time.Time) time.Time {
 	y, mo, d := t.Date()
 	return time.Date(y, mo, d, 0, 0, 0, 0, t.Location())
+}
+
+func loadAllListNamesCmd() tea.Cmd {
+	return func() tea.Msg {
+		names, _ := reminders.ListLists()
+		return listNamesMsg{names}
+	}
 }
 
 func uniqueListNames(tasks []models.Task) []string {

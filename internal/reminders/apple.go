@@ -357,12 +357,7 @@ func parseTasks(raw string) []models.Task {
 					}
 				}
 			case "PRIORITY":
-				var p int
-				fmt.Sscanf(val, "%d", &p)
-				// only map Apple's high(1) and medium(5); ignore low(9) and none(0)
-				if p == 1 || p == 5 {
-					t.Priority = p
-				}
+				// ignore Apple-side priority; taskctl uses !! / ! title prefix instead
 			case "COMPLETED":
 				if val != "" {
 					c, err := time.Parse(time.RFC3339, val)
