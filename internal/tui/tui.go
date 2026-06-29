@@ -61,6 +61,7 @@ type statsMsg struct {
 	today, week, total int
 	daily              []int
 }
+type listNamesMsg struct{ names []string }
 type batchDoneMsg struct{ err error }
 type batchDeletedMsg struct{ count int; err error }
 type tickMsg time.Time
@@ -108,10 +109,12 @@ type Model struct {
 	width    int
 	height   int
 	// form
-	inputs     [fCount]textinput.Model
-	inputIdx   int
-	submitting bool
-	editTarget *models.Task
+	inputs       [fCount]textinput.Model
+	inputIdx     int
+	submitting   bool
+	editTarget   *models.Task
+	listNames    []string
+	listPickerIdx int
 	// delete confirm
 	deleteTarget *models.Task
 	// undo
@@ -222,6 +225,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, loadTasks(m.showDone)
 		}
 
+	case listNamesMsg:
+		m.listNames = msg.names
+		m.listPickerIdx = 0
+
 	case statsMsg:
 		m.statsData = &msg
 
@@ -261,28 +268,56 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	// ── create/edit form ──────────────────────────────────────────────────
 	if m.view == viewCreate {
+		// list picker navigation: ↑/↓ navigate picker items when on List field
+		if m.inputIdx == fList && len(m.listNames) > 0 {
+			filtered := pickerFilter(m.listNames, m.inputs[fList].Value())
+			switch msg.String() {
+			case "up":
+				if m.listPickerIdx > 0 {
+					m.listPickerIdx--
+					if m.listPickerIdx < len(filtered) {
+						m.inputs[fList].SetValue(filtered[m.listPickerIdx])
+					}
+				}
+				return m, nil
+			case "down":
+				if m.listPickerIdx < len(filtered)-1 {
+					m.listPickerIdx++
+					m.inputs[fList].SetValue(filtered[m.listPickerIdx])
+				}
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "esc":
 			m.view = viewList
 			m.editTarget = nil
 			return m, nil
-		case "tab", "down":
+		case "tab":
 			m.inputs[m.inputIdx].Blur()
 			m.inputIdx = (m.inputIdx + 1) % fCount
+			m.listPickerIdx = 0
 			return m, m.inputs[m.inputIdx].Focus()
-		case "shift+tab", "up":
+		case "shift+tab":
 			m.inputs[m.inputIdx].Blur()
 			m.inputIdx = (m.inputIdx - 1 + fCount) % fCount
+			m.listPickerIdx = 0
 			return m, m.inputs[m.inputIdx].Focus()
 		case "enter":
 			if m.inputIdx < fCount-1 {
 				m.inputs[m.inputIdx].Blur()
 				m.inputIdx++
+				m.listPickerIdx = 0
 				return m, m.inputs[m.inputIdx].Focus()
 			}
 			return m.submitForm()
 		case "ctrl+s":
 			return m.submitForm()
+		}
+		// reset picker when typing in list field
+		if m.inputIdx == fList {
+			m.listPickerIdx = 0
 		}
 		var cmd tea.Cmd
 		m.inputs[m.inputIdx], cmd = m.inputs[m.inputIdx].Update(msg)
@@ -468,7 +503,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.inputs = newFormInputs("")
 		m.editTarget = nil
 		m.inputIdx = 0
-		return m, m.inputs[fTitle].Focus()
+		m.listPickerIdx = 0
+		return m, tea.Batch(m.inputs[fTitle].Focus(), loadListNamesCmd())
 
 	case "e":
 		if t := cursorTask(m); t != nil {
@@ -476,7 +512,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.inputs = prefillForm(t)
 			m.editTarget = t
 			m.inputIdx = 0
-			return m, m.inputs[fTitle].Focus()
+			m.listPickerIdx = 0
+			return m, tea.Batch(m.inputs[fTitle].Focus(), loadListNamesCmd())
 		}
 
 	case "d":
@@ -639,6 +676,22 @@ func (m Model) renderForm() string {
 	inner.WriteString(styleHeader.Render(heading) + "\n\n")
 	for i, inp := range m.inputs {
 		inner.WriteString(styleLabel.Render(formLabels[i]) + "  " + inp.View() + "\n")
+		// show list picker below the List field when focused
+		if i == fList && m.inputIdx == fList && len(m.listNames) > 0 {
+			filtered := pickerFilter(m.listNames, inp.Value())
+			for j, name := range filtered {
+				if j >= 6 {
+					break
+				}
+				prefix := "  "
+				if j == m.listPickerIdx {
+					prefix = styleKey.Render("▶ ")
+				} else {
+					prefix = styleSubhead.Render("  ")
+				}
+				inner.WriteString(strings.Repeat(" ", 30) + prefix + styleSubhead.Render(name) + "\n")
+			}
+		}
 	}
 	if m.err != nil {
 		inner.WriteString("\n" + styleErr.Render(m.err.Error()))
@@ -844,14 +897,15 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 		ctx := context.Background()
 
 		if editTarget != nil {
-			_ = reminders.DeleteTask(editTarget)
 			_ = s.DeleteByID(ctx, editTarget.ID)
+			go reminders.DeleteTask(editTarget) //nolint
 		}
 
-		if err := reminders.CreateTask(t); err != nil {
-			return taskSavedMsg{err}
-		}
+		// write to local cache immediately → instant UI response
 		_ = s.UpsertTask(ctx, t)
+		// sync to Apple Reminders in background
+		go reminders.CreateTask(t) //nolint
+
 		return taskSavedMsg{}
 	}
 }
@@ -1112,6 +1166,32 @@ func prefillForm(t *models.Task) [fCount]textinput.Model {
 func startOfDay(t time.Time) time.Time {
 	y, mo, d := t.Date()
 	return time.Date(y, mo, d, 0, 0, 0, 0, t.Location())
+}
+
+func pickerFilter(names []string, query string) []string {
+	if query == "" {
+		return names
+	}
+	q := strings.ToLower(query)
+	var out []string
+	for _, n := range names {
+		if strings.Contains(strings.ToLower(n), q) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func loadListNamesCmd() tea.Cmd {
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return listNamesMsg{}
+		}
+		defer s.Close()
+		names, _ := s.ListNames(context.Background())
+		return listNamesMsg{names}
+	}
 }
 
 func endOfDay(t time.Time) time.Time {
