@@ -7,6 +7,7 @@ import (
 
 	"github.com/aeon022/taskctl/internal/config"
 	"github.com/aeon022/taskctl/internal/models"
+	"github.com/aeon022/taskctl/internal/nlpdate"
 	"github.com/aeon022/taskctl/internal/reminders"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/google/uuid"
@@ -36,11 +37,11 @@ var addCmd = &cobra.Command{
 			UpdatedAt: time.Now(),
 		}
 		if addDue != "" {
-			d, err := time.ParseInLocation("2006-01-02", addDue, time.Local)
+			d, err := nlpdate.Parse(addDue)
 			if err != nil {
-				return fmt.Errorf("invalid --due %q (use YYYY-MM-DD)", addDue)
+				return err
 			}
-			t.DueDate = &d
+			t.DueDate = d
 		}
 
 		if err := reminders.CreateTask(t); err != nil {

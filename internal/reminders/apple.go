@@ -203,6 +203,27 @@ end tell
 	return err
 }
 
+// PostponeTask updates the due date of a reminder.
+func PostponeTask(t *models.Task, newDue time.Time) error {
+	listName := t.List
+	if listName == "" {
+		listName = defaultList()
+	}
+	iso := newDue.Format("2006-01-02T15:04:05")
+	script := fmt.Sprintf(`
+set newDate to (current date) + ((do shell script "date -jf '%%Y-%%m-%%dT%%H:%%M:%%S' '%s' '+%%s'") as integer - (do shell script "date '+%%s'") as integer)
+tell application "Reminders"
+	set theList to list "%s"
+	set matchedTasks to (reminders in theList whose name is "%s" and completed is false)
+	if (count of matchedTasks) > 0 then
+		set due date of item 1 of matchedTasks to newDate
+	end if
+end tell
+`, iso, escapeAS(listName), escapeAS(t.Title))
+	_, err := runAppleScript(script)
+	return err
+}
+
 // DeleteTask deletes a reminder by title+list.
 func DeleteTask(t *models.Task) error {
 	listName := t.List
