@@ -197,6 +197,19 @@ func (s *Store) DeleteBySource(ctx context.Context, source string) error {
 	return err
 }
 
+// RemoveShadowedLocal deletes taskctl-created tasks that now have an apple
+// counterpart with the same title+list, meaning the background sync succeeded.
+func (s *Store) RemoveShadowedLocal(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM tasks
+		WHERE source = 'taskctl'
+		  AND (title || '|' || list) IN (
+		      SELECT title || '|' || list FROM tasks WHERE source = 'apple'
+		  )
+	`)
+	return err
+}
+
 func scanTasks(rows *sql.Rows) ([]models.Task, error) {
 	var tasks []models.Task
 	for rows.Next() {

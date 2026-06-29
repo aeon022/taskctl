@@ -851,6 +851,7 @@ func syncCmd() tea.Cmd {
 		for i := range tasks {
 			_ = s.UpsertTask(ctx, &tasks[i])
 		}
+		_ = s.RemoveShadowedLocal(ctx)
 		loaded, _ := s.ListTasks(ctx, store.ListFilter{Status: "needsAction"})
 		return syncDoneMsg{tasks: loaded}
 	}

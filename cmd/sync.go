@@ -36,6 +36,7 @@ var syncCmd = &cobra.Command{
 				return fmt.Errorf("upsert: %w", err)
 			}
 		}
+		_ = s.RemoveShadowedLocal(ctx)
 
 		reminders.NotifyDueTasks(tasks)
 
