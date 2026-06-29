@@ -303,6 +303,9 @@ func (m Model) renderList() string {
 	}
 	for i, r := range m.rows {
 		if r.isHeader {
+			if i > 0 {
+				b.WriteString("\n")
+			}
 			b.WriteString("  " + styleHeader.Render(r.label) + "\n")
 			b.WriteString("  " + styleSep.Render(strings.Repeat("─", len(r.label)+2)) + "\n")
 			continue
