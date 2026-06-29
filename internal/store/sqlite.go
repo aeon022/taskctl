@@ -43,6 +43,12 @@ func (s *Store) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_tasks_list   ON tasks(list);
 		CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 		CREATE INDEX IF NOT EXISTS idx_tasks_due    ON tasks(due_date);
+		CREATE TABLE IF NOT EXISTS pending_deletes (
+			title      TEXT NOT NULL,
+			list       TEXT NOT NULL,
+			deleted_at TEXT NOT NULL,
+			PRIMARY KEY (title, list)
+		);
 	`)
 	if err != nil {
 		return err
@@ -194,6 +200,37 @@ func (s *Store) DeleteByID(ctx context.Context, id string) error {
 
 func (s *Store) DeleteBySource(ctx context.Context, source string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM tasks WHERE source = ?`, source)
+	return err
+}
+
+func (s *Store) AddPendingDelete(ctx context.Context, t *models.Task) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO pending_deletes (title, list, deleted_at) VALUES (?,?,?)`,
+		t.Title, t.List, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// IsPendingDelete returns true if a task with this title+list was user-deleted
+// and should not be re-added by sync.
+func (s *Store) IsPendingDelete(ctx context.Context, title, list string) bool {
+	var n int
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pending_deletes WHERE title=? AND list=?`, title, list).Scan(&n)
+	return n > 0
+}
+
+// ClearPendingDelete removes a task from the pending_deletes guard
+// (call when a new task with the same title+list is intentionally created).
+func (s *Store) ClearPendingDelete(ctx context.Context, title, list string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM pending_deletes WHERE title=? AND list=?`, title, list)
+	return err
+}
+
+// PrunePendingDeletes removes entries older than 14 days.
+func (s *Store) PrunePendingDeletes(ctx context.Context) error {
+	cutoff := time.Now().AddDate(0, 0, -14).UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM pending_deletes WHERE deleted_at < ?`, cutoff)
 	return err
 }
 

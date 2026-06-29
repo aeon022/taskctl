@@ -170,7 +170,7 @@ end tell
 	return err
 }
 
-// CompleteTask marks a reminder as completed by title+list.
+// CompleteTask marks a reminder as completed, searching all accounts.
 func CompleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
@@ -178,18 +178,23 @@ func CompleteTask(t *models.Task) error {
 	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
-	set theList to list "%s"
-	set matchedTasks to (reminders in theList whose name is "%s" and completed is false)
-	if (count of matchedTasks) > 0 then
-		set completed of item 1 of matchedTasks to true
-	end if
+	repeat with a in accounts
+		try
+			set theList to list "%s" of a
+			set matchedTasks to (reminders in theList whose name is "%s" and completed is false)
+			if (count of matchedTasks) > 0 then
+				set completed of item 1 of matchedTasks to true
+				return
+			end if
+		end try
+	end repeat
 end tell
 `, escapeAS(listName), escapeAS(t.Title))
 	_, err := runAppleScript(script)
 	return err
 }
 
-// UncompleteTask marks a reminder as not completed.
+// UncompleteTask marks a reminder as not completed, searching all accounts.
 func UncompleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
@@ -197,18 +202,23 @@ func UncompleteTask(t *models.Task) error {
 	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
-	set theList to list "%s"
-	set matchedTasks to (reminders in theList whose name is "%s" and completed is true)
-	if (count of matchedTasks) > 0 then
-		set completed of item 1 of matchedTasks to false
-	end if
+	repeat with a in accounts
+		try
+			set theList to list "%s" of a
+			set matchedTasks to (reminders in theList whose name is "%s" and completed is true)
+			if (count of matchedTasks) > 0 then
+				set completed of item 1 of matchedTasks to false
+				return
+			end if
+		end try
+	end repeat
 end tell
 `, escapeAS(listName), escapeAS(t.Title))
 	_, err := runAppleScript(script)
 	return err
 }
 
-// PostponeTask updates the due date of a reminder.
+// PostponeTask updates the due date of a reminder, searching all accounts.
 func PostponeTask(t *models.Task, newDue time.Time) error {
 	listName := t.List
 	if listName == "" {
@@ -218,18 +228,23 @@ func PostponeTask(t *models.Task, newDue time.Time) error {
 	script := fmt.Sprintf(`
 set newDate to (current date) + ((do shell script "date -jf '%%Y-%%m-%%dT%%H:%%M:%%S' '%s' '+%%s'") as integer - (do shell script "date '+%%s'") as integer)
 tell application "Reminders"
-	set theList to list "%s"
-	set matchedTasks to (reminders in theList whose name is "%s" and completed is false)
-	if (count of matchedTasks) > 0 then
-		set due date of item 1 of matchedTasks to newDate
-	end if
+	repeat with a in accounts
+		try
+			set theList to list "%s" of a
+			set matchedTasks to (reminders in theList whose name is "%s" and completed is false)
+			if (count of matchedTasks) > 0 then
+				set due date of item 1 of matchedTasks to newDate
+				return
+			end if
+		end try
+	end repeat
 end tell
 `, iso, escapeAS(listName), escapeAS(t.Title))
 	_, err := runAppleScript(script)
 	return err
 }
 
-// DeleteTask deletes a reminder by title+list.
+// DeleteTask deletes a reminder, searching all accounts.
 func DeleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
@@ -237,11 +252,16 @@ func DeleteTask(t *models.Task) error {
 	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
-	set theList to list "%s"
-	set matchedTasks to (reminders in theList whose name is "%s")
-	if (count of matchedTasks) > 0 then
-		delete item 1 of matchedTasks
-	end if
+	repeat with a in accounts
+		try
+			set theList to list "%s" of a
+			set matchedTasks to (reminders in theList whose name is "%s")
+			if (count of matchedTasks) > 0 then
+				delete item 1 of matchedTasks
+				return
+			end if
+		end try
+	end repeat
 end tell
 `, escapeAS(listName), escapeAS(t.Title))
 	_, err := runAppleScript(script)

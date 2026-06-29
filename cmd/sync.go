@@ -32,11 +32,15 @@ var syncCmd = &cobra.Command{
 		_ = s.DeleteBySource(ctx, "apple")
 
 		for i := range tasks {
+			if s.IsPendingDelete(ctx, tasks[i].Title, tasks[i].List) {
+				continue
+			}
 			if err := s.UpsertTask(ctx, &tasks[i]); err != nil {
 				return fmt.Errorf("upsert: %w", err)
 			}
 		}
 		_ = s.RemoveShadowedLocal(ctx)
+		_ = s.PrunePendingDeletes(ctx)
 
 		reminders.NotifyDueTasks(tasks)
 

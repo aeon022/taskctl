@@ -849,9 +849,14 @@ func syncCmd() tea.Cmd {
 		ctx := context.Background()
 		_ = s.DeleteBySource(ctx, "apple")
 		for i := range tasks {
+			// skip tasks the user deliberately deleted (pending delete guard)
+			if s.IsPendingDelete(ctx, tasks[i].Title, tasks[i].List) {
+				continue
+			}
 			_ = s.UpsertTask(ctx, &tasks[i])
 		}
 		_ = s.RemoveShadowedLocal(ctx)
+		_ = s.PrunePendingDeletes(ctx)
 		loaded, _ := s.ListTasks(ctx, store.ListFilter{Status: "needsAction"})
 		return syncDoneMsg{tasks: loaded}
 	}
@@ -901,6 +906,8 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 			go reminders.DeleteTask(editTarget) //nolint
 		}
 
+		// if a same-named task was previously deleted, clear the guard
+		_ = s.ClearPendingDelete(ctx, t.Title, t.List)
 		// write to local cache immediately → instant UI response
 		_ = s.UpsertTask(ctx, t)
 		// sync to Apple Reminders in background
@@ -911,16 +918,18 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 }
 
 func deleteTaskCmd(t *models.Task) tea.Cmd {
+	taskCopy := *t
 	return func() tea.Msg {
-		// SQLite first — instant visual feedback
+		ctx := context.Background()
 		s, err := store.New(config.DBPath())
 		if err == nil {
 			defer s.Close()
-			_ = s.DeleteByID(context.Background(), t.ID)
+			_ = s.DeleteByID(ctx, taskCopy.ID)
+			// guard: sync must not re-add this task even if Apple delete is slow
+			_ = s.AddPendingDelete(ctx, &taskCopy)
 		}
-		// Apple Reminders delete in background — don't block the UI
-		go reminders.DeleteTask(t) //nolint:errcheck
-		return taskDeletedMsg{task: t}
+		go reminders.DeleteTask(&taskCopy) //nolint:errcheck
+		return taskDeletedMsg{task: &taskCopy}
 	}
 }
 
@@ -928,24 +937,22 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 	wantDone := t.Done()
 	taskCopy := *t
 	return func() tea.Msg {
-		var err error
-		if wantDone {
-			err = reminders.CompleteTask(&taskCopy)
-		} else {
-			err = reminders.UncompleteTask(&taskCopy)
-		}
-		if err != nil {
-			return taskSavedMsg{err}
-		}
-
+		ctx := context.Background()
 		s, sErr := store.New(config.DBPath())
 		if sErr != nil {
 			return taskSavedMsg{}
 		}
 		defer s.Close()
-		ctx := context.Background()
 
+		// write status to SQLite first so sync sees the authoritative local state
 		_ = s.UpsertTask(ctx, &taskCopy)
+
+		// then update Apple Reminders (fixed: searches all accounts)
+		if wantDone {
+			_ = reminders.CompleteTask(&taskCopy)
+		} else {
+			_ = reminders.UncompleteTask(&taskCopy)
+		}
 
 		// spawn next occurrence for recurring tasks
 		if wantDone && taskCopy.Recurrence != "" {
@@ -1023,19 +1030,24 @@ func batchCompleteCmd(tasks []*models.Task) tea.Cmd {
 }
 
 func batchDeleteCmd(tasks []*models.Task) tea.Cmd {
+	copies := make([]models.Task, len(tasks))
+	for i, t := range tasks {
+		copies[i] = *t
+	}
 	return func() tea.Msg {
+		ctx := context.Background()
 		s, _ := store.New(config.DBPath())
 		if s != nil {
 			defer s.Close()
 		}
-		ctx := context.Background()
-		for _, t := range tasks {
-			_ = reminders.DeleteTask(t)
+		for i := range copies {
 			if s != nil {
-				_ = s.DeleteByID(ctx, t.ID)
+				_ = s.DeleteByID(ctx, copies[i].ID)
+				_ = s.AddPendingDelete(ctx, &copies[i])
 			}
+			go reminders.DeleteTask(&copies[i]) //nolint:errcheck
 		}
-		return batchDeletedMsg{count: len(tasks)}
+		return batchDeletedMsg{count: len(copies)}
 	}
 }
 
