@@ -53,6 +53,7 @@ type syncDoneMsg struct {
 	err   error
 }
 type taskSavedMsg struct{ err error }
+type toggleDonedMsg struct{ err error }
 type taskDeletedMsg struct {
 	task *models.Task
 	err  error
@@ -184,6 +185,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, loadTasks(m.showDone)
 		}
 
+	case toggleDonedMsg:
+		// don't reload — task stays visible as greyed-out until next sync or restart
+		if msg.err != nil {
+			m.err = msg.err
+		}
+
 	case taskDeletedMsg:
 		m.deleteTarget = nil
 		if msg.task != nil {
@@ -207,13 +214,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case batchDoneMsg:
-		m.selecting = false
-		m.selected = nil
+		// selection already cleared + tasks already greyed out from the key handler
 		if msg.err != nil {
 			m.err = msg.err
-		} else {
-			m.err = nil
-			return m, loadTasks(m.showDone)
 		}
 
 	case batchDeletedMsg:
@@ -395,9 +398,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				}
 			}
 		case "enter", "ctrl+d":
-			// complete all selected
+			// complete all selected — flip visually first, then async
 			if len(m.selected) > 0 {
 				sel := m.selectedTasks()
+				now := time.Now()
+				for _, t := range sel {
+					t.Status = "completed"
+					t.CompletedAt = &now
+				}
+				m.selecting = false
+				m.selected = nil
+				m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 				return m, batchCompleteCmd(sel)
 			}
 		case "d", "D":
@@ -998,7 +1009,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 			_ = s.UpsertTask(ctx, spawn)
 			go reminders.CreateTask(spawn) //nolint:errcheck
 		}
-		return taskSavedMsg{}
+		return toggleDonedMsg{}
 	}
 }
 
