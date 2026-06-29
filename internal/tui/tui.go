@@ -147,7 +147,7 @@ func newModel() Model {
 // ── Init / Update / View ──────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return loadTasks(m.showDone)
+	return tea.Batch(loadTasks(m.showDone), loadAllListNamesCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -162,6 +162,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 		m.loading = false
 		m.cursor = firstTaskRow(m.rows)
+		// pre-populate list entries from loaded tasks so picker works immediately
+		if len(m.listEntries) == 0 {
+			m.listEntries = uniqueListEntries(m.tasks)
+		}
 
 	case syncDoneMsg:
 		m.syncing = false
