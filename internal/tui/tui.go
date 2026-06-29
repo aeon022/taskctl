@@ -864,8 +864,9 @@ func syncCmd() tea.Cmd {
 		defer s.Close()
 		ctx := context.Background()
 		_ = s.DeleteBySource(ctx, "apple")
+		// apply any pending local status changes before inserting
+		s.OverrideWithPendingStatus(ctx, tasks)
 		for i := range tasks {
-			// skip tasks the user deliberately deleted (pending delete guard)
 			if s.IsPendingDelete(ctx, tasks[i].Title, tasks[i].List) {
 				continue
 			}
@@ -873,6 +874,7 @@ func syncCmd() tea.Cmd {
 		}
 		_ = s.RemoveShadowedLocal(ctx)
 		_ = s.PrunePendingDeletes(ctx)
+		_ = s.PrunePendingStatus(ctx)
 		loaded, _ := s.ListTasks(ctx, store.ListFilter{Status: "needsAction"})
 		return syncDoneMsg{tasks: loaded}
 	}
@@ -960,15 +962,23 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 		}
 		defer s.Close()
 
-		// write status to SQLite first so sync sees the authoritative local state
+		// persist status locally immediately — sync must not revert this
 		_ = s.UpsertTask(ctx, &taskCopy)
+		_ = s.AddPendingStatus(ctx, taskCopy.Title, taskCopy.List, taskCopy.Status)
 
-		// then update Apple Reminders (fixed: searches all accounts)
-		if wantDone {
-			_ = reminders.CompleteTask(&taskCopy)
-		} else {
-			_ = reminders.UncompleteTask(&taskCopy)
-		}
+		// Apple Reminders update in background — don't block the UI
+		go func() {
+			if wantDone {
+				_ = reminders.CompleteTask(&taskCopy)
+			} else {
+				_ = reminders.UncompleteTask(&taskCopy)
+			}
+			// clear guard once Apple confirmed the change
+			if s2, err := store.New(config.DBPath()); err == nil {
+				_ = s2.ClearPendingStatus(context.Background(), taskCopy.Title, taskCopy.List)
+				s2.Close()
+			}
+		}()
 
 		// spawn next occurrence for recurring tasks
 		if wantDone && taskCopy.Recurrence != "" {
@@ -985,8 +995,8 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 			}
 			d := taskCopy.SpawnDate()
 			spawn.DueDate = &d
-			_ = reminders.CreateTask(spawn)
 			_ = s.UpsertTask(ctx, spawn)
+			go reminders.CreateTask(spawn) //nolint:errcheck
 		}
 		return taskSavedMsg{}
 	}

@@ -31,6 +31,7 @@ var syncCmd = &cobra.Command{
 		// replace apple-sourced tasks for the synced scope
 		_ = s.DeleteBySource(ctx, "apple")
 
+		s.OverrideWithPendingStatus(ctx, tasks)
 		for i := range tasks {
 			if s.IsPendingDelete(ctx, tasks[i].Title, tasks[i].List) {
 				continue
@@ -41,6 +42,7 @@ var syncCmd = &cobra.Command{
 		}
 		_ = s.RemoveShadowedLocal(ctx)
 		_ = s.PrunePendingDeletes(ctx)
+		_ = s.PrunePendingStatus(ctx)
 
 		reminders.NotifyDueTasks(tasks)
 

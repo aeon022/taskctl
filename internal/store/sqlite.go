@@ -49,6 +49,13 @@ func (s *Store) migrate() error {
 			deleted_at TEXT NOT NULL,
 			PRIMARY KEY (title, list)
 		);
+		CREATE TABLE IF NOT EXISTS pending_status (
+			title      TEXT NOT NULL,
+			list       TEXT NOT NULL,
+			status     TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (title, list)
+		);
 	`)
 	if err != nil {
 		return err
@@ -224,6 +231,47 @@ func (s *Store) IsPendingDelete(ctx context.Context, title, list string) bool {
 func (s *Store) ClearPendingDelete(ctx context.Context, title, list string) error {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM pending_deletes WHERE title=? AND list=?`, title, list)
+	return err
+}
+
+func (s *Store) AddPendingStatus(ctx context.Context, title, list, status string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO pending_status (title, list, status, updated_at) VALUES (?,?,?,?)`,
+		title, list, status, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// OverrideWithPendingStatus updates a task slice with any locally-pending
+// status changes so that sync cannot revert them.
+func (s *Store) OverrideWithPendingStatus(ctx context.Context, tasks []models.Task) {
+	rows, err := s.db.QueryContext(ctx, `SELECT title, list, status FROM pending_status`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	pending := make(map[string]string)
+	for rows.Next() {
+		var title, list, status string
+		if rows.Scan(&title, &list, &status) == nil {
+			pending[title+"|"+list] = status
+		}
+	}
+	for i := range tasks {
+		if st, ok := pending[tasks[i].Title+"|"+tasks[i].List]; ok {
+			tasks[i].Status = st
+		}
+	}
+}
+
+func (s *Store) ClearPendingStatus(ctx context.Context, title, list string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM pending_status WHERE title=? AND list=?`, title, list)
+	return err
+}
+
+func (s *Store) PrunePendingStatus(ctx context.Context) error {
+	cutoff := time.Now().AddDate(0, 0, -14).UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM pending_status WHERE updated_at < ?`, cutoff)
 	return err
 }
 
