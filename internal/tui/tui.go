@@ -116,6 +116,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tasks = msg.tasks
 		m.rows = buildRows(m.tasks)
 		m.loading = false
+		m.cursor = firstTaskRow(m.rows)
 
 	case syncDoneMsg:
 		m.syncing = false
@@ -124,6 +125,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.tasks = msg.tasks
 			m.rows = buildRows(m.tasks)
+			m.cursor = firstTaskRow(m.rows)
 			m.err = nil
 		}
 
@@ -526,6 +528,15 @@ func (m Model) submitForm() (Model, tea.Cmd) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+func firstTaskRow(rows []row) int {
+	for i, r := range rows {
+		if !r.isHeader {
+			return i
+		}
+	}
+	return 0
+}
 
 func buildRows(tasks []models.Task) []row {
 	var rows []row
