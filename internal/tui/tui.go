@@ -61,6 +61,8 @@ type statsMsg struct {
 	today, week, total int
 	daily              []int
 }
+type batchDoneMsg struct{ err error }
+type batchDeletedMsg struct{ count int; err error }
 type tickMsg time.Time
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -79,8 +81,11 @@ var (
 	styleBox     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62")).Padding(1, 2)
 	styleErr     = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	styleRecur   = lipgloss.NewStyle().Foreground(lipgloss.Color("120"))
-	stylePomo    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("210"))
-	styleStats   = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
+	stylePomo     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("210"))
+	styleStats    = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
+	styleUrgent   = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	styleImportant = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	styleSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("120"))
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -111,6 +116,11 @@ type Model struct {
 	deleteTarget *models.Task
 	// undo
 	lastDeleted *models.Task
+	// focus mode (today + overdue only)
+	focusMode bool
+	// batch select
+	selecting bool
+	selected  map[string]bool
 	// search
 	searching   bool
 	searchInput textinput.Model
@@ -144,7 +154,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tasksLoadedMsg:
 		m.tasks = msg.tasks
-		m.rows = buildRows(m.tasks, m.searchQuery())
+		m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 		m.loading = false
 		m.cursor = firstTaskRow(m.rows)
 
@@ -154,7 +164,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			m.tasks = msg.tasks
-			m.rows = buildRows(m.tasks, m.searchQuery())
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 			m.cursor = firstTaskRow(m.rows)
 			m.err = nil
 		}
@@ -183,6 +193,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case postponeMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.err = nil
+			return m, loadTasks(m.showDone)
+		}
+
+	case batchDoneMsg:
+		m.selecting = false
+		m.selected = nil
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.err = nil
+			return m, loadTasks(m.showDone)
+		}
+
+	case batchDeletedMsg:
+		m.selecting = false
+		m.selected = nil
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
@@ -262,13 +292,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "enter":
 			m.searching = false
-			m.rows = buildRows(m.tasks, m.searchQuery())
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 			m.cursor = firstTaskRow(m.rows)
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
-		m.rows = buildRows(m.tasks, m.searchQuery())
+		m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 		m.cursor = firstTaskRow(m.rows)
 		return m, cmd
 	}
@@ -282,6 +312,57 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, deleteTaskCmd(t)
 		default:
 			m.deleteTarget = nil
+		}
+		return m, nil
+	}
+
+	// ── batch select mode ─────────────────────────────────────────────────
+	if m.selecting {
+		switch msg.String() {
+		case "esc":
+			m.selecting = false
+			m.selected = nil
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+				if m.cursor < len(m.rows) && m.rows[m.cursor].isHeader && m.cursor > 0 {
+					m.cursor--
+				}
+			}
+		case "down", "j":
+			if m.cursor < len(m.rows)-1 {
+				m.cursor++
+				if m.cursor < len(m.rows) && m.rows[m.cursor].isHeader && m.cursor < len(m.rows)-1 {
+					m.cursor++
+				}
+			}
+		case " ":
+			if t := cursorTask(m); t != nil {
+				if m.selected[t.ID] {
+					delete(m.selected, t.ID)
+				} else {
+					m.selected[t.ID] = true
+				}
+			}
+		case "A":
+			// select all
+			for _, r := range m.rows {
+				if !r.isHeader && r.task != nil {
+					m.selected[r.task.ID] = true
+				}
+			}
+		case "enter", "ctrl+d":
+			// complete all selected
+			if len(m.selected) > 0 {
+				sel := m.selectedTasks()
+				return m, batchCompleteCmd(sel)
+			}
+		case "d", "D":
+			if len(m.selected) > 0 {
+				sel := m.selectedTasks()
+				return m, batchDeleteCmd(sel)
+			}
 		}
 		return m, nil
 	}
@@ -317,6 +398,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.showDone = !m.showDone
 		return m, loadTasks(m.showDone)
 
+	case "t":
+		m.focusMode = !m.focusMode
+		m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+		m.cursor = firstTaskRow(m.rows)
+		return m, nil
+
+	case "v":
+		m.selecting = true
+		if m.selected == nil {
+			m.selected = make(map[string]bool)
+		}
+		if t := cursorTask(m); t != nil {
+			m.selected[t.ID] = true
+		}
+		return m, nil
+
 	case " ":
 		if t := cursorTask(m); t != nil {
 			if t.Done() {
@@ -327,7 +424,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				now := time.Now()
 				t.CompletedAt = &now
 			}
-			m.rows = buildRows(m.tasks, m.searchQuery())
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 			return m, toggleDoneCmd(t)
 		}
 
@@ -335,7 +432,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if t := cursorTask(m); t != nil {
 			tomorrow := time.Now().AddDate(0, 0, 1)
 			t.DueDate = &tomorrow
-			m.rows = buildRows(m.tasks, m.searchQuery())
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
 			return m, postponeCmd(t, tomorrow)
 		}
 
@@ -414,7 +511,15 @@ func (m Model) renderList() string {
 	if m.syncing {
 		status = styleSubhead.Render("  syncing…")
 	}
-	b.WriteString("  " + styleHeader.Render("taskctl") + status + "\n\n")
+	focusLabel := ""
+	if m.focusMode {
+		focusLabel = styleOverdue.Render("  [focus: today & overdue]")
+	}
+	selectLabel := ""
+	if m.selecting {
+		selectLabel = styleSelected.Render(fmt.Sprintf("  [select: %d]  space toggle  A all  enter done  d delete  esc cancel", len(m.selected)))
+	}
+	b.WriteString("  " + styleHeader.Render("taskctl") + status + focusLabel + selectLabel + "\n\n")
 
 	if m.searching {
 		b.WriteString("  " + styleKey.Render("/") + " " + m.searchInput.View() + "  (enter/esc to close)\n\n")
@@ -433,14 +538,35 @@ func (m Model) renderList() string {
 			continue
 		}
 		t := r.task
-		mark := "○"
-		var line string
-		if t.Done() {
+		// selection checkbox vs done mark
+		var mark string
+		if m.selecting {
+			if m.selected[t.ID] {
+				mark = styleSelected.Render("[x]")
+			} else {
+				mark = styleSubhead.Render("[ ]")
+			}
+		} else if t.Done() {
 			mark = "✓"
+		} else {
+			mark = "○"
+		}
+
+		// priority indicator
+		prio := ""
+		if t.Priority == 1 {
+			prio = styleUrgent.Render("‼ ")
+		} else if t.Priority == 5 {
+			prio = styleImportant.Render("! ")
+		}
+
+		var line string
+		if t.Done() && !m.selecting {
 			line = styleDone.Render(t.Title)
 		} else {
-			line = styleTitle.Render(t.Title)
+			line = prio + styleTitle.Render(t.Title)
 		}
+
 		due := ""
 		if t.DueDate != nil {
 			now := time.Now()
@@ -485,13 +611,15 @@ func (m Model) renderStatusBar() string {
 		doneLabel = "hide done"
 	}
 	return fmt.Sprintf(
-		"  %s/%s nav  %s done  %s postpone  %s undo  %s pomo  %s/%s/%s/%s tasks  %s search  %s stats  %s sync  %s %s  %s quit\n",
+		"  %s/%s nav  %s done  %s postpone  %s undo  %s pomo  %s/%s/%s tasks  %s select  %s focus  %s search  %s stats  %s sync  %s %s  %s quit\n",
 		key("↑"), key("↓"),
 		key("space"),
 		key("S"),
 		key("u"),
 		key("p"),
-		key("n"), key("e"), key("d"), key("c"),
+		key("n"), key("e"), key("d"),
+		key("v"),
+		key("t"),
 		key("/"),
 		key("i"),
 		key("s"),
@@ -676,10 +804,11 @@ func syncCmd() tea.Cmd {
 
 func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cmd {
 	return func() tea.Msg {
-		title := strings.TrimSpace(inputs[fTitle].Value())
-		if title == "" {
+		rawTitle := strings.TrimSpace(inputs[fTitle].Value())
+		if rawTitle == "" {
 			return taskSavedMsg{fmt.Errorf("title is required")}
 		}
+		title, priority := parsePriority(rawTitle)
 		listName := strings.TrimSpace(inputs[fList].Value())
 		dueStr := strings.TrimSpace(inputs[fDue].Value())
 		notes := strings.TrimSpace(inputs[fNotes].Value())
@@ -688,6 +817,7 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 		t := &models.Task{
 			ID:         "taskctl-" + uuid.New().String(),
 			Title:      title,
+			Priority:   priority,
 			List:       listName,
 			Notes:      notes,
 			Recurrence: recurrence,
@@ -818,6 +948,62 @@ func undoDeleteCmd(t *models.Task) tea.Cmd {
 	}
 }
 
+func batchCompleteCmd(tasks []*models.Task) tea.Cmd {
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return batchDoneMsg{err}
+		}
+		defer s.Close()
+		ctx := context.Background()
+		now := time.Now()
+		for _, t := range tasks {
+			_ = reminders.CompleteTask(t)
+			t.Status = "completed"
+			t.CompletedAt = &now
+			_ = s.UpsertTask(ctx, t)
+		}
+		return batchDoneMsg{}
+	}
+}
+
+func batchDeleteCmd(tasks []*models.Task) tea.Cmd {
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return batchDeletedMsg{err: err}
+		}
+		defer s.Close()
+		ctx := context.Background()
+		for _, t := range tasks {
+			_ = reminders.DeleteTask(t)
+			_ = s.DeleteByID(ctx, t.ID)
+		}
+		return batchDeletedMsg{count: len(tasks)}
+	}
+}
+
+func (m Model) selectedTasks() []*models.Task {
+	var out []*models.Task
+	for _, r := range m.rows {
+		if !r.isHeader && r.task != nil && m.selected[r.task.ID] {
+			out = append(out, r.task)
+		}
+	}
+	return out
+}
+
+// parsePriority extracts `!` / `!!` prefix from title and returns clean title + priority.
+func parsePriority(title string) (string, int) {
+	if strings.HasPrefix(title, "!! ") {
+		return strings.TrimPrefix(title, "!! "), 1
+	}
+	if strings.HasPrefix(title, "! ") {
+		return strings.TrimPrefix(title, "! "), 5
+	}
+	return title, 0
+}
+
 func notifyPomodoro(t *models.Task) {
 	title := "Pomodoro complete!"
 	msg := "25 minutes done. Time for a break."
@@ -845,11 +1031,15 @@ func (m Model) searchQuery() string {
 	return strings.ToLower(strings.TrimSpace(m.searchInput.Value()))
 }
 
-func buildRows(tasks []models.Task, query string) []row {
+func buildRows(tasks []models.Task, query string, focusMode bool) []row {
+	eod := endOfDay(time.Now())
 	var rows []row
 	curList := ""
 	for i := range tasks {
 		t := &tasks[i]
+		if focusMode && (t.DueDate == nil || t.DueDate.After(eod)) {
+			continue
+		}
 		if query != "" {
 			if !strings.Contains(strings.ToLower(t.Title), query) &&
 				!strings.Contains(strings.ToLower(t.Notes), query) {
@@ -917,6 +1107,11 @@ func prefillForm(t *models.Task) [fCount]textinput.Model {
 func startOfDay(t time.Time) time.Time {
 	y, mo, d := t.Date()
 	return time.Date(y, mo, d, 0, 0, 0, 0, t.Location())
+}
+
+func endOfDay(t time.Time) time.Time {
+	y, mo, d := t.Date()
+	return time.Date(y, mo, d, 23, 59, 59, 0, t.Location())
 }
 
 // Run starts the TUI.

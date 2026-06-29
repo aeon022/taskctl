@@ -363,6 +363,35 @@ func defaultList() string {
 	return strings.TrimSpace(out)
 }
 
+// NotifyDueTasks sends a macOS notification if tasks are due today or overdue.
+func NotifyDueTasks(tasks []models.Task) {
+	today := time.Now()
+	eod := time.Date(today.Year(), today.Month(), today.Day(), 23, 59, 59, 0, time.Local)
+	var titles []string
+	for _, t := range tasks {
+		if !t.Done() && t.DueDate != nil && !t.DueDate.After(eod) {
+			titles = append(titles, t.Title)
+		}
+	}
+	if len(titles) == 0 {
+		return
+	}
+	msg := fmt.Sprintf("%d task(s) due: %s", len(titles), strings.Join(titles[:min(3, len(titles))], ", "))
+	if len(titles) > 3 {
+		msg += "…"
+	}
+	script := fmt.Sprintf(`display notification "%s" with title "taskctl — Due Today" sound name "Ping"`,
+		escapeAS(msg))
+	_ = exec.Command("osascript", "-e", script).Run()
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func runAppleScript(script string) (string, error) {
 	cmd := exec.Command("osascript", "-e", script)
 	out, err := cmd.Output()

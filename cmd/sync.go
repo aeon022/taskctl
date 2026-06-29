@@ -37,6 +37,8 @@ var syncCmd = &cobra.Command{
 			}
 		}
 
+		reminders.NotifyDueTasks(tasks)
+
 		if isJSON() {
 			outputJSON(map[string]any{
 				"tool":    "taskctl",

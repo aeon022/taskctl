@@ -96,7 +96,7 @@ func (s *Store) ListTasks(ctx context.Context, f ListFilter) ([]models.Task, err
 		query += ` AND status = ?`
 		args = append(args, f.Status)
 	}
-	query += ` ORDER BY list, COALESCE(due_date,'9999'), title`
+	query += ` ORDER BY list, CASE WHEN priority=0 THEN 99 ELSE priority END, COALESCE(due_date,'9999'), title`
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
