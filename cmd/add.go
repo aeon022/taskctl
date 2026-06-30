@@ -44,14 +44,16 @@ var addCmd = &cobra.Command{
 			t.DueDate = d
 		}
 
-		if err := reminders.CreateTask(t); err != nil {
-			return fmt.Errorf("create: %w", err)
-		}
-
+		ctx := context.Background()
 		s, err := store.New(config.DBPath())
 		if err == nil {
 			defer s.Close()
-			_ = s.UpsertTask(context.Background(), t)
+			_ = s.ClearPendingDelete(ctx, t.Title, t.List)
+			_ = s.UpsertTask(ctx, t)
+		}
+
+		if err := reminders.CreateTask(t); err != nil {
+			return fmt.Errorf("create: %w", err)
 		}
 
 		if isJSON() {

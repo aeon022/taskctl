@@ -50,8 +50,9 @@ func (s *Store) migrate() error {
 			PRIMARY KEY (title, list)
 		);
 		CREATE TABLE IF NOT EXISTS lists (
-			name    TEXT NOT NULL,
-			account TEXT NOT NULL DEFAULT '',
+			name     TEXT NOT NULL,
+			account  TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT 'apple',
 			PRIMARY KEY (name, account)
 		);
 		CREATE TABLE IF NOT EXISTS pending_status (
@@ -65,8 +66,9 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return err
 	}
-	// add recurrence column to existing tables (ignored if already present)
+	// add columns to existing tables (ignored if already present)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN recurrence TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE lists ADD COLUMN provider TEXT NOT NULL DEFAULT 'apple'`)
 	return nil
 }
 
@@ -215,18 +217,24 @@ func (s *Store) DeleteBySource(ctx context.Context, source string) error {
 	return err
 }
 
-func (s *Store) StoreListEntries(ctx context.Context, entries []models.ListEntry) error {
+// StoreListEntries replaces all entries for a given provider.
+func (s *Store) StoreListEntries(ctx context.Context, entries []models.ListEntry, provider string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM lists`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lists WHERE provider=?`, provider); err != nil {
 		tx.Rollback()
 		return err
 	}
 	for _, e := range entries {
+		p := e.Provider
+		if p == "" {
+			p = provider
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT OR REPLACE INTO lists (name, account) VALUES (?,?)`, e.Name, e.Account); err != nil {
+			`INSERT OR REPLACE INTO lists (name, account, provider) VALUES (?,?,?)`,
+			e.Name, e.Account, p); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -235,7 +243,7 @@ func (s *Store) StoreListEntries(ctx context.Context, entries []models.ListEntry
 }
 
 func (s *Store) GetListEntries(ctx context.Context) ([]models.ListEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, account FROM lists ORDER BY name, account`)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, account, provider FROM lists ORDER BY name, account`)
 	if err != nil {
 		return nil, err
 	}
@@ -243,12 +251,23 @@ func (s *Store) GetListEntries(ctx context.Context) ([]models.ListEntry, error) 
 	var entries []models.ListEntry
 	for rows.Next() {
 		var e models.ListEntry
-		if err := rows.Scan(&e.Name, &e.Account); err != nil {
+		if err := rows.Scan(&e.Name, &e.Account, &e.Provider); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// ProviderForList returns the provider ("apple" | "google") for a given list name.
+func (s *Store) ProviderForList(ctx context.Context, listName string) string {
+	var p string
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT provider FROM lists WHERE name=? LIMIT 1`, listName).Scan(&p)
+	if p == "" {
+		return "apple"
+	}
+	return p
 }
 
 func (s *Store) AddPendingDelete(ctx context.Context, t *models.Task) error {

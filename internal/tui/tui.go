@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/googletasks"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/nlpdate"
 	"github.com/aeon022/taskctl/internal/reminders"
@@ -878,18 +879,21 @@ func loadStats() tea.Cmd {
 
 func syncCmd() tea.Cmd {
 	return func() tea.Msg {
+		ctx := context.Background()
+
+		// Apple Reminders
 		tasks, err := reminders.FetchTasks("")
 		if err != nil {
 			return syncDoneMsg{err: err}
 		}
+
 		s, err := store.New(config.DBPath())
 		if err != nil {
 			return syncDoneMsg{err: err}
 		}
 		defer s.Close()
-		ctx := context.Background()
+
 		_ = s.DeleteBySource(ctx, "apple")
-		// apply any pending local status changes before inserting
 		s.OverrideWithPendingStatus(ctx, tasks)
 		for i := range tasks {
 			if s.IsPendingDelete(ctx, tasks[i].Title, tasks[i].List) {
@@ -897,6 +901,29 @@ func syncCmd() tea.Cmd {
 			}
 			_ = s.UpsertTask(ctx, &tasks[i])
 		}
+
+		// update Apple list cache
+		if entries, err := reminders.ListListsWithAccounts(); err == nil && len(entries) > 0 {
+			_ = s.StoreListEntries(ctx, entries, "apple")
+		}
+
+		// Google Tasks (optional, silent if not configured)
+		if googletasks.IsConfigured() && googletasks.IsAuthenticated() {
+			if gTasks, err := googletasks.FetchTasks(ctx); err == nil {
+				_ = s.DeleteBySource(ctx, "google")
+				s.OverrideWithPendingStatus(ctx, gTasks)
+				for i := range gTasks {
+					if s.IsPendingDelete(ctx, gTasks[i].Title, gTasks[i].List) {
+						continue
+					}
+					_ = s.UpsertTask(ctx, &gTasks[i])
+				}
+				if lists, err := googletasks.ListTaskLists(ctx); err == nil && len(lists) > 0 {
+					_ = s.StoreListEntries(ctx, lists, "google")
+				}
+			}
+		}
+
 		_ = s.RemoveShadowedLocal(ctx)
 		_ = s.PrunePendingDeletes(ctx)
 		_ = s.PrunePendingStatus(ctx)
@@ -946,17 +973,69 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 
 		if editTarget != nil {
 			_ = s.DeleteByID(ctx, editTarget.ID)
-			go reminders.DeleteTask(editTarget) //nolint
+			go providerDelete(editTarget)
 		}
 
 		// if a same-named task was previously deleted, clear the guard
 		_ = s.ClearPendingDelete(ctx, t.Title, t.List)
 		// write to local cache immediately → instant UI response
 		_ = s.UpsertTask(ctx, t)
-		// sync to Apple Reminders in background
-		go reminders.CreateTask(t) //nolint
+		// sync to backend provider in background
+		go providerCreate(t)
 
 		return taskSavedMsg{}
+	}
+}
+
+// providerDelete deletes a task from the appropriate backend provider.
+func providerDelete(t *models.Task) {
+	ctx := context.Background()
+	switch t.Source {
+	case "google":
+		_ = googletasks.DeleteTask(ctx, t)
+	default:
+		_ = reminders.DeleteTask(t)
+	}
+}
+
+// providerComplete toggles done/undone on the appropriate backend provider.
+func providerToggle(t *models.Task, wantDone bool) {
+	ctx := context.Background()
+	switch t.Source {
+	case "google":
+		if wantDone {
+			_ = googletasks.CompleteTask(ctx, t)
+		} else {
+			_ = googletasks.UncompleteTask(ctx, t)
+		}
+	default:
+		if wantDone {
+			_ = reminders.CompleteTask(t)
+		} else {
+			_ = reminders.UncompleteTask(t)
+		}
+	}
+}
+
+// providerCreate creates a task on the appropriate backend provider.
+func providerCreate(t *models.Task) {
+	ctx := context.Background()
+	switch t.Source {
+	case "google":
+		_ = googletasks.CreateTask(ctx, t)
+	default:
+		_ = reminders.CreateTask(t)
+	}
+}
+
+// providerPostpone updates the due date on the appropriate backend provider.
+func providerPostpone(t *models.Task, newDue time.Time) error {
+	ctx := context.Background()
+	switch t.Source {
+	case "google":
+		return googletasks.PostponeTask(ctx, t, newDue)
+	default:
+		return reminders.PostponeTask(t, newDue)
 	}
 }
 
@@ -968,10 +1047,10 @@ func deleteTaskCmd(t *models.Task) tea.Cmd {
 		if err == nil {
 			defer s.Close()
 			_ = s.DeleteByID(ctx, taskCopy.ID)
-			// guard: sync must not re-add this task even if Apple delete is slow
+			// guard: sync must not re-add this task even if backend delete is slow
 			_ = s.AddPendingDelete(ctx, &taskCopy)
 		}
-		go reminders.DeleteTask(&taskCopy) //nolint:errcheck
+		go providerDelete(&taskCopy)
 		return taskDeletedMsg{task: &taskCopy}
 	}
 }
@@ -991,14 +1070,10 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 		_ = s.UpsertTask(ctx, &taskCopy)
 		_ = s.AddPendingStatus(ctx, taskCopy.Title, taskCopy.List, taskCopy.Status)
 
-		// Apple Reminders update in background — don't block the UI
+		// backend update in background — don't block the UI
 		go func() {
-			if wantDone {
-				_ = reminders.CompleteTask(&taskCopy)
-			} else {
-				_ = reminders.UncompleteTask(&taskCopy)
-			}
-			// clear guard once Apple confirmed the change
+			providerToggle(&taskCopy, wantDone)
+			// clear guard once backend confirmed the change
 			if s2, err := store.New(config.DBPath()); err == nil {
 				_ = s2.ClearPendingStatus(context.Background(), taskCopy.Title, taskCopy.List)
 				s2.Close()
@@ -1021,7 +1096,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 			d := taskCopy.SpawnDate()
 			spawn.DueDate = &d
 			_ = s.UpsertTask(ctx, spawn)
-			go reminders.CreateTask(spawn) //nolint:errcheck
+			go providerCreate(spawn)
 		}
 		return toggleDonedMsg{}
 	}
@@ -1030,7 +1105,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 func postponeCmd(t *models.Task, newDue time.Time) tea.Cmd {
 	taskCopy := *t
 	return func() tea.Msg {
-		if err := reminders.PostponeTask(&taskCopy, newDue); err != nil {
+		if err := providerPostpone(&taskCopy, newDue); err != nil {
 			return postponeMsg{err}
 		}
 		s, err := store.New(config.DBPath())
@@ -1048,15 +1123,14 @@ func undoDeleteCmd(t *models.Task) tea.Cmd {
 		t.ID = "taskctl-" + uuid.New().String()
 		t.Status = "needsAction"
 		t.CompletedAt = nil
-		if err := reminders.CreateTask(t); err != nil {
-			return taskSavedMsg{err}
-		}
 		s, err := store.New(config.DBPath())
 		if err != nil {
 			return taskSavedMsg{}
 		}
 		defer s.Close()
+		_ = s.ClearPendingDelete(context.Background(), t.Title, t.List)
 		_ = s.UpsertTask(context.Background(), t)
+		go providerCreate(t)
 		return taskSavedMsg{}
 	}
 }
@@ -1071,10 +1145,12 @@ func batchCompleteCmd(tasks []*models.Task) tea.Cmd {
 		ctx := context.Background()
 		now := time.Now()
 		for _, t := range tasks {
-			_ = reminders.CompleteTask(t)
+			tc := t
+			go providerToggle(tc, true)
 			t.Status = "completed"
 			t.CompletedAt = &now
 			_ = s.UpsertTask(ctx, t)
+			_ = s.AddPendingStatus(ctx, t.Title, t.List, "completed")
 		}
 		return batchDoneMsg{}
 	}
@@ -1096,7 +1172,7 @@ func batchDeleteCmd(tasks []*models.Task) tea.Cmd {
 				_ = s.DeleteByID(ctx, copies[i].ID)
 				_ = s.AddPendingDelete(ctx, &copies[i])
 			}
-			go reminders.DeleteTask(&copies[i]) //nolint:errcheck
+			go providerDelete(&copies[i])
 		}
 		return batchDeletedMsg{count: len(copies)}
 	}
@@ -1246,7 +1322,7 @@ func loadAllListNamesCmd() tea.Cmd {
 		// persist to SQLite cache so next startup is instant
 		if len(entries) > 0 {
 			if s, err := store.New(config.DBPath()); err == nil {
-				_ = s.StoreListEntries(context.Background(), entries)
+				_ = s.StoreListEntries(context.Background(), entries, "apple")
 				s.Close()
 			}
 		}

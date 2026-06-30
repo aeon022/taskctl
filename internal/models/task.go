@@ -2,10 +2,11 @@ package models
 
 import "time"
 
-// ListEntry is a reminder list with its account name.
+// ListEntry is a task list with its account and provider name.
 type ListEntry struct {
-	Name    string
-	Account string
+	Name     string
+	Account  string
+	Provider string // "apple" | "google"
 }
 
 type Task struct {
