@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
-	"github.com/aeon022/taskctl/internal/googletasks"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/nlpdate"
 	"github.com/aeon022/taskctl/internal/reminders"
@@ -902,26 +901,8 @@ func syncCmd() tea.Cmd {
 			_ = s.UpsertTask(ctx, &tasks[i])
 		}
 
-		// update Apple list cache
 		if entries, err := reminders.ListListsWithAccounts(); err == nil && len(entries) > 0 {
 			_ = s.StoreListEntries(ctx, entries, "apple")
-		}
-
-		// Google Tasks (optional, silent if not configured)
-		if googletasks.IsConfigured() && googletasks.IsAuthenticated() {
-			if gTasks, err := googletasks.FetchTasks(ctx); err == nil {
-				_ = s.DeleteBySource(ctx, "google")
-				s.OverrideWithPendingStatus(ctx, gTasks)
-				for i := range gTasks {
-					if s.IsPendingDelete(ctx, gTasks[i].Title, gTasks[i].List) {
-						continue
-					}
-					_ = s.UpsertTask(ctx, &gTasks[i])
-				}
-				if lists, err := googletasks.ListTaskLists(ctx); err == nil && len(lists) > 0 {
-					_ = s.StoreListEntries(ctx, lists, "google")
-				}
-			}
 		}
 
 		_ = s.RemoveShadowedLocal(ctx)
@@ -987,55 +968,14 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 	}
 }
 
-// providerDelete deletes a task from the appropriate backend provider.
-func providerDelete(t *models.Task) {
-	ctx := context.Background()
-	switch t.Source {
-	case "google":
-		_ = googletasks.DeleteTask(ctx, t)
-	default:
-		_ = reminders.DeleteTask(t)
-	}
-}
-
-// providerComplete toggles done/undone on the appropriate backend provider.
+func providerDelete(t *models.Task)                        { _ = reminders.DeleteTask(t) }
+func providerCreate(t *models.Task)                        { _ = reminders.CreateTask(t) }
+func providerPostpone(t *models.Task, d time.Time) error   { return reminders.PostponeTask(t, d) }
 func providerToggle(t *models.Task, wantDone bool) {
-	ctx := context.Background()
-	switch t.Source {
-	case "google":
-		if wantDone {
-			_ = googletasks.CompleteTask(ctx, t)
-		} else {
-			_ = googletasks.UncompleteTask(ctx, t)
-		}
-	default:
-		if wantDone {
-			_ = reminders.CompleteTask(t)
-		} else {
-			_ = reminders.UncompleteTask(t)
-		}
-	}
-}
-
-// providerCreate creates a task on the appropriate backend provider.
-func providerCreate(t *models.Task) {
-	ctx := context.Background()
-	switch t.Source {
-	case "google":
-		_ = googletasks.CreateTask(ctx, t)
-	default:
-		_ = reminders.CreateTask(t)
-	}
-}
-
-// providerPostpone updates the due date on the appropriate backend provider.
-func providerPostpone(t *models.Task, newDue time.Time) error {
-	ctx := context.Background()
-	switch t.Source {
-	case "google":
-		return googletasks.PostponeTask(ctx, t, newDue)
-	default:
-		return reminders.PostponeTask(t, newDue)
+	if wantDone {
+		_ = reminders.CompleteTask(t)
+	} else {
+		_ = reminders.UncompleteTask(t)
 	}
 }
 

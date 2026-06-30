@@ -74,6 +74,13 @@ taskctl done <id>
 # List all reminder lists
 taskctl lists
 
+# Background sync daemon (every 5 min, macOS notifications)
+taskctl daemon
+taskctl daemon --interval 10   # custom interval
+taskctl daemon --install       # install as LaunchAgent (runs at login)
+taskctl daemon --stop          # stop running daemon
+taskctl daemon --status        # check if daemon is running
+
 # Run as MCP server (stdio)
 taskctl mcp
 ```
@@ -133,8 +140,5 @@ taskctl/
 ## Roadmap
 
 ### v0.2
-- Google Tasks provider
-- Background daemon (`taskctl daemon`) for periodic sync + notifications
-
-### v0.3
+- Google Tasks provider (OAuth2 + Tasks API)
 - Microsoft To Do / Graph API

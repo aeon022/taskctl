@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
-	"github.com/aeon022/taskctl/internal/googletasks"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/reminders"
 	"github.com/aeon022/taskctl/internal/store"
@@ -145,25 +144,10 @@ func handleSync(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult
 		_ = s.UpsertTask(ctx, &tasks[i])
 	}
 
-	total := len(tasks)
-	if listName == "" && googletasks.IsConfigured() && googletasks.IsAuthenticated() {
-		if gTasks, err := googletasks.FetchTasks(ctx); err == nil {
-			_ = s.DeleteBySource(ctx, "google")
-			s.OverrideWithPendingStatus(ctx, gTasks)
-			for i := range gTasks {
-				if s.IsPendingDelete(ctx, gTasks[i].Title, gTasks[i].List) {
-					continue
-				}
-				_ = s.UpsertTask(ctx, &gTasks[i])
-			}
-			total += len(gTasks)
-		}
-	}
-
 	_ = s.RemoveShadowedLocal(ctx)
 	_ = s.PrunePendingDeletes(ctx)
 	_ = s.PrunePendingStatus(ctx)
-	return mcp.NewToolResultText(fmt.Sprintf("Synced %d tasks", total)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Synced %d tasks", len(tasks))), nil
 }
 
 func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -202,19 +186,8 @@ func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 		_ = s.UpsertTask(ctx, t)
 	}
 
-	provider := "apple"
-	if s != nil {
-		provider = s.ProviderForList(ctx, listName)
-	}
-	var createErr error
-	switch provider {
-	case "google":
-		createErr = googletasks.CreateTask(ctx, t)
-	default:
-		createErr = reminders.CreateTask(t)
-	}
-	if createErr != nil {
-		return mcp.NewToolResultError("create failed: " + createErr.Error()), nil
+	if err := reminders.CreateTask(t); err != nil {
+		return mcp.NewToolResultError("create failed: " + err.Error()), nil
 	}
 
 	due := ""
@@ -248,19 +221,9 @@ func handleCompleteTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 		_ = s.AddPendingStatus(ctx, title, listName, "completed")
 	}
 
-	t := &models.Task{Title: title, List: listName, Source: "apple"}
-	if s != nil {
-		t.Source = s.ProviderForList(ctx, listName)
-	}
-	var completeErr error
-	switch t.Source {
-	case "google":
-		completeErr = googletasks.CompleteTask(ctx, t)
-	default:
-		completeErr = reminders.CompleteTask(t)
-	}
-	if completeErr != nil {
-		return mcp.NewToolResultError("complete failed: " + completeErr.Error()), nil
+	t := &models.Task{Title: title, List: listName}
+	if err := reminders.CompleteTask(t); err != nil {
+		return mcp.NewToolResultError("complete failed: " + err.Error()), nil
 	}
 
 	if s != nil {
@@ -295,15 +258,8 @@ func handleDeleteTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 		_ = s.AddPendingDelete(ctx, t)
 	}
 
-	var deleteErr error
-	switch t.Source {
-	case "google":
-		deleteErr = googletasks.DeleteTask(ctx, t)
-	default:
-		deleteErr = reminders.DeleteTask(t)
-	}
-	if deleteErr != nil {
-		return mcp.NewToolResultError("delete failed: " + deleteErr.Error()), nil
+	if err := reminders.DeleteTask(t); err != nil {
+		return mcp.NewToolResultError("delete failed: " + err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Deleted: %s", title)), nil
 }
