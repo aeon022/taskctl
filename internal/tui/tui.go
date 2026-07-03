@@ -71,24 +71,34 @@ type tickMsg time.Time
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
-	styleSubhead = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	styleSep     = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-	styleDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Strikethrough(true)
-	styleTitle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	styleDue     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	styleOverdue = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	styleCursor  = lipgloss.NewStyle().Background(lipgloss.Color("62")).Foreground(lipgloss.Color("230"))
-	styleKey     = lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	styleLabel   = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Width(28)
-	styleBox     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62")).Padding(1, 2)
-	styleErr     = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	styleRecur   = lipgloss.NewStyle().Foreground(lipgloss.Color("120"))
-	stylePomo     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("210"))
-	styleStats    = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
-	styleUrgent   = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	styleImportant = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	styleSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("120"))
+	colorBlue   = lipgloss.AdaptiveColor{Light: "25",  Dark: "33"}
+	colorGreen  = lipgloss.AdaptiveColor{Light: "28",  Dark: "42"}
+	colorRed    = lipgloss.AdaptiveColor{Light: "160", Dark: "203"}
+	colorAmber  = lipgloss.AdaptiveColor{Light: "214", Dark: "220"}
+	colorMuted  = lipgloss.AdaptiveColor{Light: "243", Dark: "246"}
+	colorSubtle = lipgloss.AdaptiveColor{Light: "250", Dark: "239"}
+
+	styleHeader   = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	styleSubhead  = lipgloss.NewStyle().Foreground(colorMuted)
+	styleSep      = lipgloss.NewStyle().Foreground(colorSubtle)
+	styleDone     = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
+	styleTitle    = lipgloss.NewStyle()
+	styleDue      = lipgloss.NewStyle().Foreground(colorAmber)
+	styleOverdue  = lipgloss.NewStyle().Foreground(colorRed)
+	styleCursor   = lipgloss.NewStyle().
+				Background(lipgloss.AdaptiveColor{Light: "189", Dark: "17"}).
+				Foreground(lipgloss.AdaptiveColor{Light: "16",  Dark: "255"}).
+				Bold(true)
+	styleKey      = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+	styleLabel    = lipgloss.NewStyle().Foreground(colorMuted).Width(28)
+	styleBox      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
+	styleErr      = lipgloss.NewStyle().Foreground(colorRed)
+	styleRecur    = lipgloss.NewStyle().Foreground(colorGreen)
+	stylePomo     = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
+	styleStats    = lipgloss.NewStyle().Foreground(colorBlue)
+	styleUrgent   = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+	styleImportant = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+	styleSelected = lipgloss.NewStyle().Foreground(colorGreen)
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -259,6 +269,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tick()
 		}
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			if m.cursor > 0 {
+				m.cursor--
+				if m.cursor < len(m.rows) && m.rows[m.cursor].isHeader && m.cursor > 0 {
+					m.cursor--
+				}
+			}
+		case tea.MouseButtonWheelDown:
+			if m.cursor < len(m.rows)-1 {
+				m.cursor++
+				if m.cursor < len(m.rows) && m.rows[m.cursor].isHeader && m.cursor < len(m.rows)-1 {
+					m.cursor++
+				}
+			}
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -1291,7 +1320,7 @@ func endOfDay(t time.Time) time.Time {
 
 // Run starts the TUI.
 func Run() error {
-	p := tea.NewProgram(newModel(), tea.WithAltScreen())
+	p := tea.NewProgram(newModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
