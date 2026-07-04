@@ -20,6 +20,7 @@ func Serve() error {
 		server.WithToolCapabilities(true),
 	)
 	s.AddTool(toolToday(), handleToday)
+	s.AddTool(toolWeekTasks(), handleWeekTasks)
 	s.AddTool(toolListTasks(), handleListTasks)
 	s.AddTool(toolSync(), handleSync)
 	s.AddTool(toolCreateTask(), handleCreateTask)
@@ -33,6 +34,12 @@ func Serve() error {
 func toolToday() mcp.Tool {
 	return mcp.NewTool("today_tasks",
 		mcp.WithDescription("Get tasks due today or overdue. Good for morning briefings."),
+	)
+}
+
+func toolWeekTasks() mcp.Tool {
+	return mcp.NewTool("week_tasks",
+		mcp.WithDescription("Get tasks due this week (Monday to Sunday). Good for weekly planning and reviewing upcoming work."),
 	)
 }
 
@@ -100,6 +107,43 @@ func handleToday(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult,
 		}
 	}
 	return mcp.NewToolResultText(formatTasks(due, "Tasks due today/overdue")), nil
+}
+
+func handleWeekTasks(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s, err := store.New(config.DBPath())
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer s.Close()
+
+	tasks, err := s.ListTasks(context.Background(), store.ListFilter{Status: "needsAction"})
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	mon, sun := weekBounds()
+	var due []models.Task
+	for _, t := range tasks {
+		if t.DueDate != nil && !t.DueDate.Before(mon) && !t.DueDate.After(sun) {
+			due = append(due, t)
+		}
+	}
+	header := fmt.Sprintf("Tasks this week (%s – %s)",
+		mon.Format("Mon Jan 02"), sun.Format("Mon Jan 02"))
+	return mcp.NewToolResultText(formatTasks(due, header)), nil
+}
+
+func weekBounds() (time.Time, time.Time) {
+	now := time.Now()
+	wd := int(now.Weekday())
+	if wd == 0 {
+		wd = 7
+	}
+	mon := now.AddDate(0, 0, -(wd - 1))
+	mon = time.Date(mon.Year(), mon.Month(), mon.Day(), 0, 0, 0, 0, time.Local)
+	sun := mon.AddDate(0, 0, 6)
+	sun = time.Date(sun.Year(), sun.Month(), sun.Day(), 23, 59, 59, 0, time.Local)
+	return mon, sun
 }
 
 func handleListTasks(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
