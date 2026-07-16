@@ -13,6 +13,7 @@ import (
 	"github.com/aeon022/taskctl/internal/nlpdate"
 	"github.com/aeon022/taskctl/internal/reminders"
 	"github.com/aeon022/taskctl/internal/store"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -28,6 +29,7 @@ const (
 	viewCreate   view = 1
 	viewPomodoro view = 2
 	viewStats    view = 3
+	viewHelp     view = 4
 )
 
 // ── Form fields ───────────────────────────────────────────────────────────────
@@ -116,6 +118,7 @@ type Model struct {
 	view     view
 	loading  bool
 	syncing  bool
+	sp       spinner.Model
 	showDone bool
 	err      error
 	width    int
@@ -148,10 +151,14 @@ type Model struct {
 }
 
 func newModel() Model {
+	sp := spinner.New()
+	sp.Spinner = spinner.MiniDot
+	sp.Style = styleSubhead
+
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 80
-	return Model{loading: true, searchInput: si}
+	return Model{loading: true, searchInput: si, sp: sp}
 }
 
 // ── Init / Update / View ──────────────────────────────────────────────────────
@@ -289,6 +296,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case spinner.TickMsg:
+		if m.syncing {
+			var cmd tea.Cmd
+			m.sp, cmd = m.sp.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -309,6 +324,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// ── stats view ────────────────────────────────────────────────────────
 	if m.view == viewStats {
 		m.view = viewList
+		return m, nil
+	}
+
+	// ── help overlay ──────────────────────────────────────────────────────
+	if m.view == viewHelp {
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "q", "esc", "?":
+			m.view = viewList
+		}
 		return m, nil
 	}
 
@@ -456,6 +482,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
+	case "?":
+		m.view = viewHelp
+
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -475,7 +504,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if !m.syncing {
 			m.syncing = true
 			m.err = nil
-			return m, syncCmd()
+			return m, tea.Batch(syncCmd(), m.sp.Tick)
 		}
 
 	case "c":
@@ -584,6 +613,8 @@ func (m Model) View() string {
 		return m.renderPomodoro()
 	case viewStats:
 		return m.renderStats()
+	case viewHelp:
+		return m.renderHelp()
 	default:
 		return m.renderList()
 	}
@@ -597,7 +628,7 @@ func (m Model) renderList() string {
 
 	status := ""
 	if m.syncing {
-		status = styleSubhead.Render("  syncing…")
+		status = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
 	}
 	focusLabel := ""
 	if m.focusMode {
@@ -687,6 +718,37 @@ func (m Model) renderList() string {
 	return b.String()
 }
 
+func (m Model) renderHelp() string {
+	key := func(k string) string { return styleKey.Render(fmt.Sprintf("%-9s", k)) }
+	row := func(k, desc string) string { return "  " + key(k) + styleSubhead.Render(desc) + "\n" }
+	section := func(t string) string { return "\n  " + styleHeader.Render(t) + "\n" }
+
+	var b strings.Builder
+	b.WriteString("\n  " + styleHeader.Render("taskctl") + styleSubhead.Render(" — tasks from the terminal") + "\n")
+	b.WriteString(section("Navigation"))
+	b.WriteString(row("j / ↓", "move down"))
+	b.WriteString(row("k / ↑", "move up"))
+	b.WriteString(row("/", "search tasks (esc clears)"))
+	b.WriteString(row("t", "focus mode — today & overdue only"))
+	b.WriteString(row("c", "show / hide completed tasks"))
+	b.WriteString(section("Tasks"))
+	b.WriteString(row("space", "toggle done"))
+	b.WriteString(row("n", "new task"))
+	b.WriteString(row("e", "edit task"))
+	b.WriteString(row("d", "delete task (asks to confirm)"))
+	b.WriteString(row("S", "postpone to tomorrow"))
+	b.WriteString(row("u", "undo last action"))
+	b.WriteString(section("Batch & Extras"))
+	b.WriteString(row("v", "select mode (space toggle, A all, enter done, d delete)"))
+	b.WriteString(row("p", "pomodoro timer for selected task"))
+	b.WriteString(row("i", "stats"))
+	b.WriteString(row("s", "sync with Apple Reminders"))
+	b.WriteString(section("Other"))
+	b.WriteString(row("?", "toggle this help"))
+	b.WriteString(row("q", "quit"))
+	return b.String()
+}
+
 func (m Model) renderStatusBar() string {
 	key := func(k string) string { return styleKey.Render(k) }
 
@@ -699,7 +761,7 @@ func (m Model) renderStatusBar() string {
 		doneLabel = "hide done"
 	}
 	return fmt.Sprintf(
-		"  %s/%s nav  %s done  %s postpone  %s undo  %s pomo  %s/%s/%s tasks  %s select  %s focus  %s search  %s stats  %s sync  %s %s  %s quit\n",
+		"  %s/%s nav  %s done  %s postpone  %s undo  %s pomo  %s/%s/%s tasks  %s select  %s focus  %s search  %s stats  %s sync  %s %s  %s help  %s quit\n",
 		key("↑"), key("↓"),
 		key("space"),
 		key("S"),
@@ -712,6 +774,7 @@ func (m Model) renderStatusBar() string {
 		key("i"),
 		key("s"),
 		key("c"), doneLabel,
+		key("?"),
 		key("q"),
 	)
 }
