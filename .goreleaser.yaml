@@ -43,6 +43,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: https://github.com/aeon022/taskctl
+    license: MIT
     description: "Task management from your terminal - syncs with Apple Reminders"
     install: |
       bin.install "taskctl"
