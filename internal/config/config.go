@@ -36,7 +36,14 @@ func Load() error {
 	return viper.Unmarshal(&Active)
 }
 
+// DBPathOverride, when non-empty, overrides DBPath()'s return value. Used by tests
+// to point at a temporary database instead of the real one on disk.
+var DBPathOverride string
+
 func DBPath() string {
+	if DBPathOverride != "" {
+		return DBPathOverride
+	}
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, "Library", "Application Support", "taskctl")
 	_ = os.MkdirAll(dir, 0755)
