@@ -645,7 +645,14 @@ func (m Model) renderList() string {
 	}
 
 	if len(m.rows) == 0 {
-		b.WriteString("  No tasks found.\n")
+		switch {
+		case m.searchQuery() != "":
+			b.WriteString("  No tasks match your search.\n")
+		case len(m.tasks) == 0:
+			b.WriteString("  No tasks yet — press n to add one, or s to sync with Apple Reminders.\n")
+		default:
+			b.WriteString("  No tasks found.\n")
+		}
 	}
 	for i, r := range m.rows {
 		if r.isHeader {
