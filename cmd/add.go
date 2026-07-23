@@ -26,10 +26,14 @@ var addCmd = &cobra.Command{
 	Example: `  taskctl add "Call dentist" --due 2026-07-05 --list Privat`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		list := addList
+		if list == "" {
+			list = config.Active.DefaultList
+		}
 		t := &models.Task{
 			ID:        "taskctl-" + uuid.New().String(),
 			Title:     args[0],
-			List:      addList,
+			List:      list,
 			Notes:     addNotes,
 			Status:    "needsAction",
 			Source:    "taskctl",
@@ -70,7 +74,7 @@ var addCmd = &cobra.Command{
 }
 
 func init() {
-	addCmd.Flags().StringVar(&addList, "list", "", "Reminder list (default: system default)")
+	addCmd.Flags().StringVar(&addList, "list", "", "Reminder list (default: config default_list, else system default)")
 	addCmd.Flags().StringVar(&addDue, "due", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringVar(&addNotes, "notes", "", "Notes")
 	rootCmd.AddCommand(addCmd)

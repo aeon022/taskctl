@@ -577,7 +577,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "n":
 		m.listEntries = uniqueListEntries(m.tasks)
 		m.view = viewCreate
-		m.inputs = newFormInputs("")
+		m.inputs = newFormInputs(config.Active.DefaultList)
 		m.editTarget = nil
 		m.inputIdx = 0
 		m.listPickerIdx = 0

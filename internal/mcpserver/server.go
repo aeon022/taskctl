@@ -203,6 +203,9 @@ func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	if title == "" {
 		return mcp.NewToolResultError("title is required"), nil
 	}
+	if listName == "" {
+		listName = config.Active.DefaultList
+	}
 
 	t := &models.Task{
 		ID:        "taskctl-" + uuid.New().String(),
