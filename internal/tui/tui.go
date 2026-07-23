@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/taskctl/internal/config"
 	"github.com/aeon022/taskctl/internal/models"
@@ -16,6 +17,7 @@ import (
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
@@ -68,7 +70,10 @@ type statsMsg struct {
 }
 type listNamesMsg struct{ entries []models.ListEntry }
 type batchDoneMsg struct{ err error }
-type batchDeletedMsg struct{ count int; err error }
+type batchDeletedMsg struct {
+	count int
+	err   error
+}
 type tickMsg time.Time
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -82,27 +87,27 @@ var (
 	colorMuted  = theme.Muted
 	colorSubtle = theme.Subtle
 
-	styleHeader   = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
-	styleSubhead  = lipgloss.NewStyle().Foreground(colorMuted)
-	styleSep      = lipgloss.NewStyle().Foreground(colorSubtle)
-	styleDone     = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
-	styleTitle    = lipgloss.NewStyle()
-	styleDue      = lipgloss.NewStyle().Foreground(colorAmber)
-	styleOverdue  = lipgloss.NewStyle().Foreground(colorRed)
-	styleCursor   = lipgloss.NewStyle().
-				Background(theme.SelectedBg).
-				Foreground(theme.SelectedFg).
-				Bold(true)
-	styleKey      = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
-	styleLabel    = lipgloss.NewStyle().Foreground(colorMuted).Width(28)
-	styleBox      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
-	styleErr      = lipgloss.NewStyle().Foreground(colorRed)
-	styleRecur    = lipgloss.NewStyle().Foreground(colorGreen)
-	stylePomo     = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
-	styleStats    = lipgloss.NewStyle().Foreground(colorBlue)
-	styleUrgent   = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	styleSubhead = lipgloss.NewStyle().Foreground(colorMuted)
+	styleSep     = lipgloss.NewStyle().Foreground(colorSubtle)
+	styleDone    = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
+	styleTitle   = lipgloss.NewStyle()
+	styleDue     = lipgloss.NewStyle().Foreground(colorAmber)
+	styleOverdue = lipgloss.NewStyle().Foreground(colorRed)
+	styleCursor  = lipgloss.NewStyle().
+			Background(theme.SelectedBg).
+			Foreground(theme.SelectedFg).
+			Bold(true)
+	styleKey       = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+	styleLabel     = lipgloss.NewStyle().Foreground(colorMuted).Width(28)
+	styleBox       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
+	styleErr       = lipgloss.NewStyle().Foreground(colorRed)
+	styleRecur     = lipgloss.NewStyle().Foreground(colorGreen)
+	stylePomo      = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
+	styleStats     = lipgloss.NewStyle().Foreground(colorBlue)
+	styleUrgent    = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	styleImportant = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	styleSelected = lipgloss.NewStyle().Foreground(colorGreen)
+	styleSelected  = lipgloss.NewStyle().Foreground(colorGreen)
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -150,6 +155,11 @@ type Model struct {
 	pomRunning bool
 	// stats
 	statsData *statsMsg
+
+	// "?" transient help popup
+	helpVP   viewport.Model
+	helpPopW int
+	helpPopH int
 }
 
 func newModel() Model {
@@ -336,8 +346,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, tea.Quit
 		case "q", "esc", "?":
 			m.view = viewList
+			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.helpVP, cmd = m.helpVP.Update(msg)
+		return m, cmd
 	}
 
 	// ── create/edit form ──────────────────────────────────────────────────
@@ -485,7 +498,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "?":
-		m.view = viewHelp
+		m = m.openHelp()
 
 	case "up", "k":
 		if m.cursor > 0 {
@@ -616,7 +629,10 @@ func (m Model) View() string {
 	case viewStats:
 		return m.renderStats()
 	case viewHelp:
-		return m.renderHelp()
+		// "?" is only reachable from the main list, so the list is always
+		// the correct background to keep visible behind the popup. No
+		// enclosing border on the list view, so inset 0 is safe.
+		return overlay.Center(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
 	default:
 		return m.renderList()
 	}
@@ -733,13 +749,12 @@ func (m Model) renderList() string {
 	return b.String()
 }
 
-func (m Model) renderHelp() string {
+func (m Model) helpContent() string {
 	key := func(k string) string { return styleKey.Render(fmt.Sprintf("%-9s", k)) }
 	row := func(k, desc string) string { return "  " + key(k) + styleSubhead.Render(desc) + "\n" }
 	section := func(t string) string { return "\n  " + styleHeader.Render(t) + "\n" }
 
 	var b strings.Builder
-	b.WriteString("\n" + m.renderHeader("Help") + "\n")
 	b.WriteString(section("Navigation"))
 	b.WriteString(row("j / ↓", "move down"))
 	b.WriteString(row("k / ↑", "move up"))
@@ -762,6 +777,43 @@ func (m Model) renderHelp() string {
 	b.WriteString(row("?", "toggle this help"))
 	b.WriteString(row("q", "quit"))
 	return b.String()
+}
+
+// openHelp sizes and populates the transient help popup (see
+// renderHelpPopup/overlay.Center) from the ACTUAL rendered background
+// height, not the terminal size.
+func (m Model) openHelp() Model {
+	bgLines := strings.Split(m.renderList(), "\n")
+
+	safeH := max(6, len(bgLines))
+	popH := min(safeH, 22)
+	popW := min(70, m.width)
+	if popW < 40 {
+		popW = 40
+	}
+
+	vp := viewport.New(popW-6, popH-5) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for footer
+	vp.SetContent(m.helpContent())
+
+	m.helpVP = vp
+	m.helpPopW = popW
+	m.helpPopH = popH
+	m.view = viewHelp
+	return m
+}
+
+var stylePopupBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
+
+// renderHelpPopup renders the help viewport in a bordered box, meant to be
+// composited over the list view via overlay.Center rather than replacing
+// the whole screen — the list stays visible around it.
+func (m Model) renderHelpPopup() string {
+	footer := "esc / ?  close"
+	if m.helpVP.TotalLineCount() > m.helpVP.Height {
+		footer = fmt.Sprintf("j/k scroll (%d%%)  ·  %s", int(m.helpVP.ScrollPercent()*100), footer)
+	}
+	body := m.helpVP.View() + "\n" + styleSubhead.Render(footer)
+	return stylePopupBorder.Width(m.helpPopW).Render(body)
 }
 
 func (m Model) renderStatusBar() string {
@@ -822,7 +874,7 @@ func (m Model) renderForm() string {
 				e := m.listEntries[j]
 				label := e.Name
 				if e.Account != "" {
-					label += styleSubhead.Render(" ("+e.Account+")")
+					label += styleSubhead.Render(" (" + e.Account + ")")
 				}
 				if j == m.listPickerIdx {
 					inner.WriteString(strings.Repeat(" ", 30) + styleKey.Render("▶ ") + styleKey.Render(e.Name) + styleSubhead.Render(func() string {
@@ -1075,9 +1127,9 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 	}
 }
 
-func providerDelete(t *models.Task)                        { _ = reminders.DeleteTask(t) }
-func providerCreate(t *models.Task)                        { _ = reminders.CreateTask(t) }
-func providerPostpone(t *models.Task, d time.Time) error   { return reminders.PostponeTask(t, d) }
+func providerDelete(t *models.Task)                      { _ = reminders.DeleteTask(t) }
+func providerCreate(t *models.Task)                      { _ = reminders.CreateTask(t) }
+func providerPostpone(t *models.Task, d time.Time) error { return reminders.PostponeTask(t, d) }
 func providerToggle(t *models.Task, wantDone bool) {
 	if wantDone {
 		_ = reminders.CompleteTask(t)
