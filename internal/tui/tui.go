@@ -166,7 +166,7 @@ func newModel() Model {
 // ── Init / Update / View ──────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadTasks(m.showDone), loadCachedListEntriesCmd(), loadAllListNamesCmd())
+	return tea.Batch(loadTasks(m.showDone), loadCachedListEntriesCmd(), loadAllListNamesCmd(), m.sp.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -299,7 +299,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.syncing {
+		if m.syncing || m.loading {
 			var cmd tea.Cmd
 			m.sp, cmd = m.sp.Update(msg)
 			return m, cmd
@@ -606,7 +606,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if m.loading {
-		return "\n  Loading tasks…\n"
+		return "\n  " + m.sp.View() + styleSubhead.Render(" Loading tasks…") + "\n"
 	}
 	switch m.view {
 	case viewCreate:
