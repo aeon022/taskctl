@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/taskctl/internal/config"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/nlpdate"
@@ -73,12 +74,13 @@ type tickMsg time.Time
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	colorBlue   = lipgloss.AdaptiveColor{Light: "25",  Dark: "33"}
-	colorGreen  = lipgloss.AdaptiveColor{Light: "28",  Dark: "42"}
-	colorRed    = lipgloss.AdaptiveColor{Light: "160", Dark: "203"}
-	colorAmber  = lipgloss.AdaptiveColor{Light: "214", Dark: "220"}
-	colorMuted  = lipgloss.AdaptiveColor{Light: "243", Dark: "246"}
-	colorSubtle = lipgloss.AdaptiveColor{Light: "250", Dark: "244"}
+	// Shared across the suite via missionctl-core/theme.
+	colorBlue   = theme.Blue
+	colorGreen  = theme.Green
+	colorRed    = theme.Red
+	colorAmber  = theme.Amber
+	colorMuted  = theme.Muted
+	colorSubtle = theme.Subtle
 
 	styleHeader   = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	styleSubhead  = lipgloss.NewStyle().Foreground(colorMuted)
@@ -88,8 +90,8 @@ var (
 	styleDue      = lipgloss.NewStyle().Foreground(colorAmber)
 	styleOverdue  = lipgloss.NewStyle().Foreground(colorRed)
 	styleCursor   = lipgloss.NewStyle().
-				Background(lipgloss.AdaptiveColor{Light: "189", Dark: "17"}).
-				Foreground(lipgloss.AdaptiveColor{Light: "16",  Dark: "255"}).
+				Background(theme.SelectedBg).
+				Foreground(theme.SelectedFg).
 				Bold(true)
 	styleKey      = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
 	styleLabel    = lipgloss.NewStyle().Foreground(colorMuted).Width(28)
