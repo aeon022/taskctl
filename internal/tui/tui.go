@@ -622,6 +622,12 @@ func (m Model) View() string {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
+// renderHeader is the one header shared by every view: app name + current
+// section, so it stays a constant anchor no matter which screen is active.
+func (m Model) renderHeader(section string) string {
+	return "  " + styleHeader.Render("taskctl") + styleSubhead.Render(" · "+section)
+}
+
 func (m Model) renderList() string {
 	var b strings.Builder
 	b.WriteString("\n")
@@ -638,7 +644,7 @@ func (m Model) renderList() string {
 	if m.selecting {
 		selectLabel = styleSelected.Render(fmt.Sprintf("  [select: %d]  space toggle  A all  enter done  d delete  esc cancel", len(m.selected)))
 	}
-	b.WriteString("  " + styleHeader.Render("taskctl") + status + focusLabel + selectLabel + "\n\n")
+	b.WriteString(m.renderHeader("Tasks") + status + focusLabel + selectLabel + "\n\n")
 
 	if m.searching {
 		b.WriteString("  " + styleKey.Render("/") + " " + m.searchInput.View() + "  (enter/esc to close)\n\n")
@@ -731,7 +737,7 @@ func (m Model) renderHelp() string {
 	section := func(t string) string { return "\n  " + styleHeader.Render(t) + "\n" }
 
 	var b strings.Builder
-	b.WriteString("\n  " + styleHeader.Render("taskctl") + styleSubhead.Render(" — tasks from the terminal") + "\n")
+	b.WriteString("\n" + m.renderHeader("Help") + "\n")
 	b.WriteString(section("Navigation"))
 	b.WriteString(row("j / ↓", "move down"))
 	b.WriteString(row("k / ↑", "move up"))
@@ -838,7 +844,7 @@ func (m Model) renderForm() string {
 
 	key := func(k string) string { return styleKey.Render(k) }
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString("\n" + m.renderHeader(heading) + "\n\n")
 	b.WriteString(styleBox.Render(inner.String()))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("  %s next  %s next/save  %s save  %s cancel\n",
@@ -879,8 +885,8 @@ func (m Model) renderPomodoro() string {
 	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
 
 	var b strings.Builder
-	b.WriteString("\n\n")
-	b.WriteString("  " + styleHeader.Render("Pomodoro — "+title) + "\n\n")
+	b.WriteString("\n" + m.renderHeader("Pomodoro") + "\n\n")
+	b.WriteString("  " + styleHeader.Render(title) + "\n\n")
 	b.WriteString("  " + stylePomo.Render(timerStr) + "\n\n")
 	b.WriteString("  " + styleSubhead.Render(bar) + "\n\n")
 	if done {
@@ -894,7 +900,7 @@ func (m Model) renderPomodoro() string {
 
 func (m Model) renderStats() string {
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString("\n" + m.renderHeader("Stats") + "\n\n")
 	b.WriteString("  " + styleHeader.Render("Productivity") + "\n\n")
 
 	if m.statsData == nil {
