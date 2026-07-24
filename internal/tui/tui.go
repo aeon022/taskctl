@@ -21,6 +21,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
+	"github.com/sahilm/fuzzy"
 )
 
 // ── Views ────────────────────────────────────────────────────────────────────
@@ -678,6 +679,7 @@ func (m Model) renderList() string {
 			b.WriteString("  No tasks found.\n")
 		}
 	}
+	query := m.searchQuery()
 	for i, r := range m.rows {
 		if r.isHeader {
 			if i > 0 {
@@ -711,10 +713,17 @@ func (m Model) renderList() string {
 		}
 
 		var line string
-		if t.Done() && !m.selecting {
+		switch {
+		case t.Done() && !m.selecting:
 			line = styleDone.Render(t.Title)
-		} else {
+		case i == m.cursor:
+			// The cursor row wraps its whole line in a single
+			// styleCursor.Render() call below — nesting highlighted
+			// (real-ANSI) text here would clobber that background for
+			// everything after it, so the cursor row's title stays plain.
 			line = prio + styleTitle.Render(t.Title)
+		default:
+			line = prio + highlightMatches(t.Title, fuzzyMatchIndexes(query, t.Title), styleTitle)
 		}
 
 		due := ""
@@ -1325,8 +1334,30 @@ func (m Model) searchQuery() string {
 	return strings.ToLower(strings.TrimSpace(m.searchInput.Value()))
 }
 
+// buildRows filters tasks into display rows, grouped by list (unchanged).
+// Query matching now fuzzy-matches the title (github.com/sahilm/fuzzy)
+// instead of a plain substring check, falling back to a substring match on
+// notes — but unlike habctl's filterHabits, it does NOT re-rank by match
+// quality: reordering by fuzzy score would scatter a single list's tasks
+// across non-contiguous positions, fragmenting the "isHeader" grouping
+// this function builds. Fuzzy only widens WHICH tasks match; the original
+// list-grouped order is preserved.
 func buildRows(tasks []models.Task, query string, focusMode bool) []row {
 	eod := endOfDay(time.Now())
+
+	var titleMatch map[int]bool
+	if query != "" {
+		titles := make([]string, len(tasks))
+		for i, t := range tasks {
+			titles[i] = t.Title
+		}
+		matches := fuzzy.Find(query, titles)
+		titleMatch = make(map[int]bool, len(matches))
+		for _, mt := range matches {
+			titleMatch[mt.Index] = true
+		}
+	}
+
 	var rows []row
 	curList := ""
 	for i := range tasks {
@@ -1334,11 +1365,8 @@ func buildRows(tasks []models.Task, query string, focusMode bool) []row {
 		if focusMode && (t.DueDate == nil || t.DueDate.After(eod)) {
 			continue
 		}
-		if query != "" {
-			if !strings.Contains(strings.ToLower(t.Title), query) &&
-				!strings.Contains(strings.ToLower(t.Notes), query) {
-				continue
-			}
+		if query != "" && !titleMatch[i] && !strings.Contains(strings.ToLower(t.Notes), query) {
+			continue
 		}
 		if t.List != curList {
 			curList = t.List
@@ -1347,6 +1375,52 @@ func buildRows(tasks []models.Task, query string, focusMode bool) []row {
 		rows = append(rows, row{task: t})
 	}
 	return rows
+}
+
+// fuzzyMatchIndexes returns the rune indexes within s that q fuzzy-matched,
+// or nil if q is empty or doesn't match at all.
+func fuzzyMatchIndexes(q, s string) []int {
+	if q == "" {
+		return nil
+	}
+	matches := fuzzy.Find(q, []string{s})
+	if len(matches) == 0 {
+		return nil
+	}
+	return matches[0].MatchedIndexes
+}
+
+// highlightMatches renders s with the rune positions in idxs (from
+// fuzzyMatchIndexes) styled via a warm, underlined variant of base, and
+// every other character via base itself — fzf-style match highlighting.
+//
+// Renders one character at a time rather than nesting a highlighted span
+// inside a single outer Render() call: lipgloss's Render() ends every
+// string with a full SGR reset, so an inner Render() call's reset would
+// wipe out the outer style for everything after the first highlighted
+// character. Per-character rendering keeps every segment self-contained.
+// Only used for non-cursor rows here — the cursor row wraps its whole line
+// in a single styleCursor.Render() call, and nesting highlighted text
+// inside that would reintroduce exactly this bug for the cursor's own
+// background.
+func highlightMatches(s string, idxs []int, base lipgloss.Style) string {
+	if len(idxs) == 0 {
+		return base.Render(s)
+	}
+	hi := base.Foreground(colorAmber).Underline(true)
+	matchSet := make(map[int]bool, len(idxs))
+	for _, i := range idxs {
+		matchSet[i] = true
+	}
+	var b strings.Builder
+	for i, r := range []rune(s) {
+		if matchSet[i] {
+			b.WriteString(hi.Render(string(r)))
+		} else {
+			b.WriteString(base.Render(string(r)))
+		}
+	}
+	return b.String()
 }
 
 func firstTaskRow(rows []row) int {
