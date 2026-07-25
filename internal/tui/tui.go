@@ -306,6 +306,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor++
 				}
 			}
+		case tea.MouseButtonLeft:
+			if msg.Action != tea.MouseActionPress || m.view != viewList {
+				return m, nil
+			}
+			if i := m.rowHitTest(msg.Y); i >= 0 {
+				m.cursor = i
+			}
 		}
 		return m, nil
 
@@ -756,6 +763,36 @@ func (m Model) renderList() string {
 	b.WriteString("\n")
 	b.WriteString(m.renderStatusBar())
 	return b.String()
+}
+
+// rowHitTest returns the m.rows index at screen row y, or -1 if the click
+// missed (landed on a section header, blank line, or outside the list).
+// Mirrors the exact line-counting renderList uses: 1 blank line, the header
+// line + blank, an optional 2-line search bar, then each row consumes 1
+// line — except section headers, which consume 2 lines (label + rule),
+// plus a leading blank line for every header after the first.
+func (m Model) rowHitTest(y int) int {
+	row := 3
+	if m.searching {
+		row += 2
+	}
+	for i, r := range m.rows {
+		if r.isHeader {
+			if i > 0 {
+				row++
+			}
+			if y >= row && y < row+2 {
+				return -1
+			}
+			row += 2
+			continue
+		}
+		if y == row {
+			return i
+		}
+		row++
+	}
+	return -1
 }
 
 func (m Model) helpContent() string {
