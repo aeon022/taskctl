@@ -687,7 +687,13 @@ func (m Model) renderList() string {
 		}
 	}
 	query := m.searchQuery()
-	for i, r := range m.rows {
+	listHeight := m.height - 6
+	if m.searching {
+		listHeight -= 2
+	}
+	visible, start := m.visibleRowsWithStart(listHeight)
+	for localI, r := range visible {
+		i := start + localI
 		if r.isHeader {
 			if i > 0 {
 				b.WriteString("\n")
@@ -765,18 +771,52 @@ func (m Model) renderList() string {
 	return b.String()
 }
 
+// visibleRowsWithStart returns the scroll-windowed slice of m.rows that
+// keeps m.cursor in view (row-count budget, not exact lines — headers
+// spanning multiple lines get the same treatment renderList and
+// rowHitTest agree on), plus its start index into m.rows so callers can
+// map a local index back to the global one.
+func (m Model) visibleRowsWithStart(height int) ([]row, int) {
+	if len(m.rows) == 0 {
+		return nil, 0
+	}
+	if height < 1 {
+		height = 1
+	}
+	start := 0
+	end := len(m.rows)
+	if end-start > height {
+		mid := m.cursor - height/2
+		if mid < 0 {
+			mid = 0
+		}
+		if mid+height > end {
+			mid = end - height
+		}
+		start = mid
+		end = start + height
+	}
+	return m.rows[start:end], start
+}
+
 // rowHitTest returns the m.rows index at screen row y, or -1 if the click
 // missed (landed on a section header, blank line, or outside the list).
 // Mirrors the exact line-counting renderList uses: 1 blank line, the header
 // line + blank, an optional 2-line search bar, then each row consumes 1
 // line — except section headers, which consume 2 lines (label + rule),
-// plus a leading blank line for every header after the first.
+// plus a leading blank line for every header after the first. Walks the
+// same scroll window renderList computes, so a click lands on the row
+// it visually appears to be over even once the list has scrolled.
 func (m Model) rowHitTest(y int) int {
 	row := 3
+	listHeight := m.height - 6
 	if m.searching {
 		row += 2
+		listHeight -= 2
 	}
-	for i, r := range m.rows {
+	visible, start := m.visibleRowsWithStart(listHeight)
+	for localI, r := range visible {
+		i := start + localI
 		if r.isHeader {
 			if i > 0 {
 				row++
