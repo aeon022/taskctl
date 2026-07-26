@@ -1417,10 +1417,14 @@ func openURLCmd(url string) tea.Cmd {
 }
 
 // effectiveURL returns t.URL if set, otherwise the first link found in
-// Notes — a fallback for reminders where someone pasted a link into the
-// notes text instead of using the dedicated URL field. The url field itself
-// round-trips fine via EventKit (reminders.CreateTask uses it); it's only
-// AppleScript that can't write it, which is why creation prefers EventKit.
+// Notes. The fallback matters more than it looks: EKReminder.url only
+// round-trips for URLs taskctl itself wrote via EventKit. Reminders added
+// through Reminders.app/Safari's share sheet can show a URL in the app's UI
+// that neither EventKit's r.url nor AppleScript's `url of reminder` exposes
+// — confirmed directly (a real reminder with a visible ikea.com link in
+// Reminders.app came back with an empty url from both APIs). No known
+// public-API fix; pasting the link into Notes is the only reliable path
+// for those.
 func effectiveURL(t *models.Task) string {
 	if t.URL != "" {
 		return t.URL
