@@ -68,6 +68,7 @@ var formLabels = [fCount]string{"Title", "List", "Due", "Notes", "URL", "Repeat 
 const formLabelWidth = 28
 
 const pomodoroDuration = 25 * time.Minute
+const doubleClickWindow = 400 * time.Millisecond
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
@@ -98,8 +99,10 @@ type batchDeletedMsg struct {
 }
 type tickMsg time.Time
 type clearDeletedToastMsg struct{ id string }
+type clearFlashMsg struct{ text string }
 
 const deletedToastDuration = 5 * time.Second
+const flashDuration = 2 * time.Second
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -152,14 +155,18 @@ type Model struct {
 	rows     []row
 	cursor   int
 	hoverRow int // m.rows index under the mouse cursor, -1 when none
-	view     view
-	loading  bool
-	syncing  bool
-	sp       spinner.Model
-	showDone bool
-	err      error
-	width    int
-	height   int
+	// double-click detection: a second left-click on the same row within
+	// doubleClickWindow opens the detail popup instead of just selecting.
+	lastClickRow int
+	lastClickAt  time.Time
+	view         view
+	loading      bool
+	syncing      bool
+	sp           spinner.Model
+	showDone     bool
+	err          error
+	width        int
+	height       int
 	// form
 	inputs        [fCount]textinput.Model
 	inputIdx      int
@@ -173,6 +180,8 @@ type Model struct {
 	detailTarget *models.Task
 	// undo
 	lastDeleted *models.Task
+	// transient confirmation (e.g. "Copied to clipboard"), auto-clears
+	flash string
 	// list filter: at most one of focus (today+overdue) or overdue-only active
 	filter listFilterMode
 	// batch select
@@ -202,7 +211,7 @@ func newModel() Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 80
-	return Model{loading: true, searchInput: si, sp: sp, hoverRow: -1}
+	return Model{loading: true, searchInput: si, sp: sp, hoverRow: -1, lastClickRow: -1}
 }
 
 // ── Init / Update / View ──────────────────────────────────────────────────────
@@ -275,6 +284,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearDeletedToastMsg:
 		if m.lastDeleted != nil && m.lastDeleted.ID == msg.id {
 			m.lastDeleted = nil
+		}
+
+	case clearFlashMsg:
+		if m.flash == msg.text {
+			m.flash = ""
 		}
 
 	case postponeMsg:
@@ -356,7 +370,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 {
+				now := time.Now()
+				if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
+					m.cursor = i
+					m.lastClickRow = -1 // consumed, so a third click starts fresh
+					if t := cursorTask(m); t != nil {
+						m.detailTarget = t
+						m.view = viewDetail
+					}
+					return m, nil
+				}
 				m.cursor = i
+				m.lastClickRow = i
+				m.lastClickAt = now
+			}
+		case tea.MouseButtonRight:
+			if msg.Action != tea.MouseActionPress || m.view != viewList {
+				return m, nil
+			}
+			// Toggle done on whatever row was clicked, not the cursor row —
+			// a quick-action shouldn't require selecting first.
+			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 {
+				if t := taskAtRow(m, i); t != nil {
+					if t.Done() {
+						t.Status = "needsAction"
+						t.CompletedAt = nil
+					} else {
+						t.Status = "completed"
+						now := time.Now()
+						t.CompletedAt = &now
+					}
+					m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+					return m, toggleDoneCmd(t)
+				}
 			}
 		case tea.MouseButtonNone:
 			if msg.Action == tea.MouseActionMotion && m.view == viewList {
@@ -689,6 +735,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, toggleDoneCmd(t)
 		}
 
+	case "y":
+		if t := cursorTask(m); t != nil {
+			m.flash = "Copied to clipboard"
+			return m, tea.Batch(copyToClipboardCmd(t.Title), clearFlashCmd(m.flash))
+		}
+
 	case "S":
 		if t := cursorTask(m); t != nil {
 			tomorrow := time.Now().AddDate(0, 0, 1)
@@ -1012,6 +1064,9 @@ func (m Model) renderList() string {
 	if m.lastDeleted != nil {
 		b.WriteString("\n  " + styleSubhead.Render(fmt.Sprintf("Deleted %q — press u to undo", m.lastDeleted.Title)) + "\n")
 	}
+	if m.flash != "" {
+		b.WriteString("\n  " + styleSelected.Render(m.flash) + "\n")
+	}
 	if m.err != nil {
 		b.WriteString("\n  " + styleErr.Render(m.err.Error()) + "\n")
 	}
@@ -1106,6 +1161,7 @@ func (m Model) helpContent() string {
 	b.WriteString(row("d", "delete task (asks to confirm)"))
 	b.WriteString(row("o", "open task URL in browser"))
 	b.WriteString(row("S", "postpone to tomorrow"))
+	b.WriteString(row("y", "copy title to clipboard"))
 	b.WriteString(row("u", "undo last action"))
 	b.WriteString(section("Batch & Extras"))
 	b.WriteString(row("v", "select mode (space toggle, A all, enter done, d delete)"))
@@ -1456,6 +1512,23 @@ func tick() tea.Cmd {
 func clearDeletedToastCmd(id string) tea.Cmd {
 	return tea.Tick(deletedToastDuration, func(time.Time) tea.Msg {
 		return clearDeletedToastMsg{id: id}
+	})
+}
+
+// copyToClipboardCmd shells out to pbcopy — same approach mailctl uses for
+// its "y" copy shortcut, no clipboard library dependency needed.
+func copyToClipboardCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		_ = cmd.Run()
+		return nil
+	}
+}
+
+func clearFlashCmd(text string) tea.Cmd {
+	return tea.Tick(flashDuration, func(time.Time) tea.Msg {
+		return clearFlashMsg{text: text}
 	})
 }
 
@@ -1945,10 +2018,14 @@ func firstTaskRow(rows []row) int {
 }
 
 func cursorTask(m Model) *models.Task {
-	if m.cursor >= len(m.rows) || m.rows[m.cursor].isHeader {
+	return taskAtRow(m, m.cursor)
+}
+
+func taskAtRow(m Model, i int) *models.Task {
+	if i < 0 || i >= len(m.rows) || m.rows[i].isHeader {
 		return nil
 	}
-	return m.rows[m.cursor].task
+	return m.rows[i].task
 }
 
 func newFormInputs(defaultList string) [fCount]textinput.Model {
