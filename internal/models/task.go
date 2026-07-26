@@ -7,6 +7,7 @@ type ListEntry struct {
 	Name     string
 	Account  string
 	Provider string // "apple" | "google"
+	Color    string // hex "#RRGGBB", "" if the list uses no custom color
 }
 
 type Task struct {

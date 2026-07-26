@@ -81,6 +81,9 @@ type batchDeletedMsg struct {
 	err   error
 }
 type tickMsg time.Time
+type clearDeletedToastMsg struct{ id string }
+
+const deletedToastDuration = 5 * time.Second
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -99,21 +102,23 @@ var (
 	styleDone    = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
 	styleTitle   = lipgloss.NewStyle()
 	styleDue     = lipgloss.NewStyle().Foreground(colorAmber)
+	styleToday   = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
 	styleOverdue = lipgloss.NewStyle().Foreground(colorRed)
 	styleCursor  = lipgloss.NewStyle().
 			Background(theme.SelectedBg).
 			Foreground(theme.SelectedFg).
 			Bold(true)
-	styleKey       = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
-	styleLabel     = lipgloss.NewStyle().Foreground(colorMuted).Width(28)
-	styleBox       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
-	styleErr       = lipgloss.NewStyle().Foreground(colorRed)
-	styleRecur     = lipgloss.NewStyle().Foreground(colorGreen)
-	stylePomo      = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
-	styleStats     = lipgloss.NewStyle().Foreground(colorBlue)
-	styleUrgent    = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
-	styleImportant = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	styleSelected  = lipgloss.NewStyle().Foreground(colorGreen)
+	styleKey        = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+	styleLabel      = lipgloss.NewStyle().Foreground(colorMuted).Width(28)
+	styleBox        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
+	styleErr        = lipgloss.NewStyle().Foreground(colorRed)
+	styleRecur      = lipgloss.NewStyle().Foreground(colorGreen)
+	stylePomo       = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
+	styleStats      = lipgloss.NewStyle().Foreground(colorBlue)
+	styleUrgent     = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+	styleImportant  = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+	styleSelected   = lipgloss.NewStyle().Foreground(colorGreen)
+	styleFocusBadge = lipgloss.NewStyle().Background(colorRed).Foreground(theme.SelectedFg).Padding(0, 1)
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -235,8 +240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case taskDeletedMsg:
 		m.deleteTarget = nil
+		var clearCmd tea.Cmd
 		if msg.task != nil {
 			m.lastDeleted = msg.task
+			clearCmd = clearDeletedToastCmd(msg.task.ID)
 		}
 		if msg.err != nil {
 			// Reminders delete failed (e.g. non-iCloud list) — show warning
@@ -245,7 +252,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.err = nil
 		}
-		return m, loadTasks(m.showDone)
+		return m, tea.Batch(loadTasks(m.showDone), clearCmd)
+
+	case clearDeletedToastMsg:
+		if m.lastDeleted != nil && m.lastDeleted.ID == msg.id {
+			m.lastDeleted = nil
+		}
 
 	case postponeMsg:
 		if msg.err != nil {
@@ -588,6 +600,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// jump to the nth visible (on-screen) task row, headers not counted
+		n := int(msg.String()[0] - '0')
+		listHeight := m.height - 5 - m.statusBarHeight()
+		if m.searching {
+			listHeight -= 2
+		}
+		visible, start := m.visibleRowsWithStart(listHeight)
+		count := 0
+		for i, r := range visible {
+			if r.isHeader {
+				continue
+			}
+			count++
+			if count == n {
+				m.cursor = start + i
+				break
+			}
+		}
+
 	case "s":
 		if !m.syncing {
 			m.syncing = true
@@ -772,10 +804,11 @@ func (m Model) renderList() string {
 		extra = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
 	}
 	if m.focusMode {
-		extra += styleOverdue.Render("  [focus: today & overdue]")
+		extra += "  " + styleFocusBadge.Render("focus: today & overdue")
 	}
 	if m.selecting {
-		extra += styleSelected.Render(fmt.Sprintf("  [select: %d]  space toggle  A all  enter done  d delete  esc cancel", len(m.selected)))
+		extra += "  " + theme.Selected.Render(fmt.Sprintf("select: %d", len(m.selected))) +
+			styleSubhead.Render("  space toggle  A all  enter done  d delete  esc cancel")
 	}
 	b.WriteString(extra + "\n")
 
@@ -796,11 +829,17 @@ func (m Model) renderList() string {
 		}
 	}
 	query := m.searchQuery()
-	listHeight := m.height - 5 - statusBarHeight
+	listHeight := m.height - 5 - m.statusBarHeight()
 	if m.searching {
 		listHeight -= 2
 	}
 	counts := m.groupCounts()
+	listColors := make(map[string]string, len(m.listEntries))
+	for _, e := range m.listEntries {
+		if e.Color != "" {
+			listColors[e.Name] = e.Color
+		}
+	}
 	visible, start := m.visibleRowsWithStart(listHeight)
 	for localI, r := range visible {
 		i := start + localI
@@ -809,8 +848,12 @@ func (m Model) renderList() string {
 				b.WriteString("\n")
 			}
 			badge := styleSubhead.Render(fmt.Sprintf(" (%d)", counts[r.label]))
-			b.WriteString("  " + styleHeader.Render(r.label) + badge + "\n")
-			b.WriteString("  " + styleSep.Render(strings.Repeat("─", len(r.label)+2)) + "\n")
+			bullet := ""
+			if c := listColors[r.label]; c != "" {
+				bullet = lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("● ")
+			}
+			b.WriteString("  " + bullet + styleHeader.Render(r.label) + badge + "\n")
+			b.WriteString("  " + styleSep.Render(strings.Repeat("─", max(0, m.width-2))) + "\n")
 			continue
 		}
 		t := r.task
@@ -830,10 +873,13 @@ func (m Model) renderList() string {
 
 		// priority indicator
 		prio := ""
-		if t.Priority == 1 {
+		switch t.Priority {
+		case 1:
 			prio = styleUrgent.Render("‼ ")
-		} else if t.Priority == 5 {
+		case 5:
 			prio = styleImportant.Render("! ")
+		case 9:
+			prio = styleSubhead.Render("↓ ")
 		}
 
 		var line string
@@ -853,9 +899,12 @@ func (m Model) renderList() string {
 		due := ""
 		if t.DueDate != nil {
 			now := time.Now()
-			if t.DueDate.Before(startOfDay(now)) {
+			switch {
+			case t.DueDate.Before(startOfDay(now)):
 				due = "  " + styleOverdue.Render("overdue "+t.DueDate.Format("Jan 02"))
-			} else {
+			case !t.DueDate.After(endOfDay(now)):
+				due = "  " + styleToday.Render("due today")
+			default:
 				due = "  " + styleDue.Render("due "+t.DueDate.Format("Mon Jan 02"))
 			}
 		}
@@ -927,7 +976,7 @@ func (m Model) visibleRowsWithStart(height int) ([]row, int) {
 // it visually appears to be over even once the list has scrolled.
 func (m Model) rowHitTest(y int) int {
 	row := 3
-	listHeight := m.height - 5 - statusBarHeight
+	listHeight := m.height - 5 - m.statusBarHeight()
 	if m.searching {
 		row += 2
 		listHeight -= 2
@@ -962,6 +1011,7 @@ func (m Model) helpContent() string {
 	b.WriteString(section("Navigation"))
 	b.WriteString(row("j / ↓", "move down"))
 	b.WriteString(row("k / ↑", "move up"))
+	b.WriteString(row("1-9", "jump to the nth visible task"))
 	b.WriteString(row("/", "search tasks (esc clears)"))
 	b.WriteString(row("t", "focus mode — today & overdue only"))
 	b.WriteString(row("c", "show / hide completed tasks"))
@@ -1032,8 +1082,15 @@ func (m Model) renderDetailPopup() string {
 	}
 	label := func(s string) string { return styleSubhead.Render(fmt.Sprintf("%-10s", s)) }
 
+	popW := min(70, m.width)
+	if popW < 40 {
+		popW = 40
+	}
+	// inner content width: popW minus the border box's own padding+border
+	rule := styleSep.Render(strings.Repeat("─", max(0, popW-6)))
+
 	var b strings.Builder
-	b.WriteString(styleHeader.Render(t.Title) + "\n\n")
+	b.WriteString(styleHeader.Render(t.Title) + "\n" + rule + "\n")
 	b.WriteString(label("List") + t.List + "\n")
 	status := "open"
 	if t.Done() {
@@ -1051,6 +1108,8 @@ func (m Model) renderDetailPopup() string {
 		b.WriteString(label("Priority") + "high\n")
 	case 5:
 		b.WriteString(label("Priority") + "medium\n")
+	case 9:
+		b.WriteString(label("Priority") + "low\n")
 	}
 	url := effectiveURL(t)
 	if t.URL != "" {
@@ -1059,7 +1118,7 @@ func (m Model) renderDetailPopup() string {
 		b.WriteString(label("URL") + styleDue.Render(url) + styleSubhead.Render(" (from notes)") + "\n")
 	}
 	if t.Notes != "" {
-		b.WriteString("\n" + label("Notes") + "\n" + t.Notes + "\n")
+		b.WriteString(rule + "\n" + label("Notes") + "\n" + t.Notes + "\n")
 	}
 
 	footer := "e edit  d delete  p pomodoro"
@@ -1069,12 +1128,12 @@ func (m Model) renderDetailPopup() string {
 	footer += "  esc/enter close"
 	b.WriteString("\n" + styleSubhead.Render(footer))
 
-	popW := min(70, m.width)
-	if popW < 40 {
-		popW = 40
-	}
 	return stylePopupBorder.Width(popW).Render(b.String())
 }
+
+// narrowFooter reports whether the terminal is too narrow for the full
+// two-line key legend, which crowds/wraps below this width.
+func (m Model) narrowFooter() bool { return m.width > 0 && m.width < 90 }
 
 func (m Model) renderStatusBar() string {
 	key := func(k string) string { return styleKey.Render(k) }
@@ -1082,6 +1141,10 @@ func (m Model) renderStatusBar() string {
 	if m.deleteTarget != nil {
 		return fmt.Sprintf("  Delete %q?  %s confirm  any cancel\n",
 			m.deleteTarget.Title, key("y"))
+	}
+	if m.narrowFooter() {
+		return fmt.Sprintf("  %s/%s nav  %s done  %s new  %s search  %s help  %s quit\n",
+			key("↑"), key("↓"), key("space"), key("n"), key("/"), key("?"), key("q"))
 	}
 	doneLabel := "show done"
 	if m.showDone {
@@ -1112,7 +1175,12 @@ func (m Model) renderStatusBar() string {
 	return line1 + "\n" + line2 + "\n"
 }
 
-const statusBarHeight = 2
+func (m Model) statusBarHeight() int {
+	if m.narrowFooter() {
+		return 1
+	}
+	return 2
+}
 
 func (m Model) renderForm() string {
 	heading := "New Task"
@@ -1272,6 +1340,15 @@ func sparkline(counts []int) string {
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// clearDeletedToastCmd auto-dismisses the "Deleted X — press u to undo"
+// toast after deletedToastDuration, carrying the task ID so a stale timer
+// from an older delete can't wipe a newer toast that replaced it.
+func clearDeletedToastCmd(id string) tea.Cmd {
+	return tea.Tick(deletedToastDuration, func(time.Time) tea.Msg {
+		return clearDeletedToastMsg{id: id}
+	})
 }
 
 func loadTasks(showDone bool) tea.Cmd {

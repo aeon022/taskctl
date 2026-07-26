@@ -71,6 +71,7 @@ func (s *Store) migrate() error {
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN recurrence TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN url TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE lists ADD COLUMN provider TEXT NOT NULL DEFAULT 'apple'`)
+	_, _ = s.db.Exec(`ALTER TABLE lists ADD COLUMN color TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -235,8 +236,8 @@ func (s *Store) StoreListEntries(ctx context.Context, entries []models.ListEntry
 			p = provider
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT OR REPLACE INTO lists (name, account, provider) VALUES (?,?,?)`,
-			e.Name, e.Account, p); err != nil {
+			`INSERT OR REPLACE INTO lists (name, account, provider, color) VALUES (?,?,?,?)`,
+			e.Name, e.Account, p, e.Color); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -245,7 +246,7 @@ func (s *Store) StoreListEntries(ctx context.Context, entries []models.ListEntry
 }
 
 func (s *Store) GetListEntries(ctx context.Context) ([]models.ListEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, account, provider FROM lists ORDER BY name, account`)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, account, provider, color FROM lists ORDER BY name, account`)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +254,7 @@ func (s *Store) GetListEntries(ctx context.Context) ([]models.ListEntry, error) 
 	var entries []models.ListEntry
 	for rows.Next() {
 		var e models.ListEntry
-		if err := rows.Scan(&e.Name, &e.Account, &e.Provider); err != nil {
+		if err := rows.Scan(&e.Name, &e.Account, &e.Provider, &e.Color); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

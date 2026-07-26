@@ -126,7 +126,8 @@ func ListLists() ([]string, error) {
 	return out, nil
 }
 
-// ListListsWithAccounts returns all reminder lists with their account names.
+// ListListsWithAccounts returns all reminder lists with their account names
+// and, where the user picked a custom color in Reminders.app, its hex color.
 func ListListsWithAccounts() ([]models.ListEntry, error) {
 	script := `
 tell application "Reminders"
@@ -134,7 +135,11 @@ tell application "Reminders"
 	repeat with a in accounts
 		set aName to name of a
 		repeat with l in lists of a
-			set output to output & (name of l) & "|" & aName & linefeed
+			set lColor to ""
+			try
+				if color of l is not missing value then set lColor to color of l
+			end try
+			set output to output & (name of l) & "|" & aName & "|" & lColor & linefeed
 		end repeat
 	end repeat
 	return output
@@ -149,10 +154,13 @@ end tell`
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "|", 2)
+		parts := strings.SplitN(line, "|", 3)
 		e := models.ListEntry{Name: strings.TrimSpace(parts[0])}
-		if len(parts) == 2 {
+		if len(parts) >= 2 {
 			e.Account = strings.TrimSpace(parts[1])
+		}
+		if len(parts) >= 3 {
+			e.Color = strings.TrimSpace(parts[2])
 		}
 		entries = append(entries, e)
 	}
