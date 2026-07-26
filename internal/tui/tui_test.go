@@ -86,7 +86,7 @@ func TestBuildRows_FuzzyMatchesTitle(t *testing.T) {
 		{ID: "1", Title: "budgetctl release", List: "Work"},
 		{ID: "2", Title: "write docs", List: "Work"},
 	}
-	rows := buildRows(tasks, "bgt", false)
+	rows := buildRows(tasks, "bgt", filterNone)
 	var titles []string
 	for _, r := range rows {
 		if !r.isHeader {
@@ -102,7 +102,7 @@ func TestBuildRows_FallsBackToNotesSubstring(t *testing.T) {
 	tasks := []models.Task{
 		{ID: "1", Title: "unrelated", Notes: "about budgetctl imports", List: "Work"},
 	}
-	rows := buildRows(tasks, "budgetctl", false)
+	rows := buildRows(tasks, "budgetctl", filterNone)
 	var titles []string
 	for _, r := range rows {
 		if !r.isHeader {
@@ -124,7 +124,7 @@ func TestBuildRows_PreservesListGroupingRatherThanRankingByMatchQuality(t *testi
 		{ID: "1", Title: "budgetctl release", List: "Work"},
 		{ID: "2", Title: "buy groceries budget", List: "Personal"},
 	}
-	rows := buildRows(tasks, "budget", false)
+	rows := buildRows(tasks, "budget", filterNone)
 	if len(rows) != 4 {
 		t.Fatalf("expected 2 headers + 2 tasks = 4 rows, got %d: %+v", len(rows), rows)
 	}
@@ -144,7 +144,7 @@ func TestBuildRows_PreservesListGroupingRatherThanRankingByMatchQuality(t *testi
 
 func TestBuildRows_EmptyQueryReturnsAllUnfiltered(t *testing.T) {
 	tasks := []models.Task{{ID: "1", Title: "a", List: "L"}, {ID: "2", Title: "b", List: "L"}}
-	rows := buildRows(tasks, "", false)
+	rows := buildRows(tasks, "", filterNone)
 	count := 0
 	for _, r := range rows {
 		if !r.isHeader {

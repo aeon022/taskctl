@@ -37,6 +37,17 @@ const (
 	viewDetail   view = 5
 )
 
+// listFilterMode narrows the list view. At most one is active at a time —
+// turning one on turns the other off, rather than letting them combine
+// into a state neither key's own label describes.
+type listFilterMode int
+
+const (
+	filterNone listFilterMode = iota
+	filterFocus
+	filterOverdue
+)
+
 // ── Form fields ───────────────────────────────────────────────────────────────
 
 const (
@@ -157,8 +168,8 @@ type Model struct {
 	detailTarget *models.Task
 	// undo
 	lastDeleted *models.Task
-	// focus mode (today + overdue only)
-	focusMode bool
+	// list filter: at most one of focus (today+overdue) or overdue-only active
+	filter listFilterMode
 	// batch select
 	selecting bool
 	selected  map[string]bool
@@ -204,7 +215,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tasksLoadedMsg:
 		m.tasks = msg.tasks
-		m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 		m.loading = false
 		m.cursor = firstTaskRow(m.rows)
 		// pre-populate list entries from loaded tasks so picker works immediately
@@ -218,7 +229,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			m.tasks = msg.tasks
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 			m.cursor = firstTaskRow(m.rows)
 			m.err = nil
 		}
@@ -496,13 +507,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "enter":
 			m.searching = false
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 			m.cursor = firstTaskRow(m.rows)
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
-		m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 		m.cursor = firstTaskRow(m.rows)
 		return m, cmd
 	}
@@ -526,7 +537,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case "esc":
 			m.selecting = false
 			m.selected = nil
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -567,7 +578,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				}
 				m.selecting = false
 				m.selected = nil
-				m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+				m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 				return m, batchCompleteCmd(sel)
 			}
 		case "d", "D":
@@ -630,8 +641,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, loadTasks(m.showDone)
 
 	case "t":
-		m.focusMode = !m.focusMode
-		m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+		if m.filter == filterFocus {
+			m.filter = filterNone
+		} else {
+			m.filter = filterFocus
+		}
+		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+		m.cursor = firstTaskRow(m.rows)
+		return m, nil
+
+	case "O":
+		if m.filter == filterOverdue {
+			m.filter = filterNone
+		} else {
+			m.filter = filterOverdue
+		}
+		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 		m.cursor = firstTaskRow(m.rows)
 		return m, nil
 
@@ -655,7 +680,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				now := time.Now()
 				t.CompletedAt = &now
 			}
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 			return m, toggleDoneCmd(t)
 		}
 
@@ -663,7 +688,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if t := cursorTask(m); t != nil {
 			tomorrow := time.Now().AddDate(0, 0, 1)
 			t.DueDate = &tomorrow
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.focusMode)
+			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 			return m, postponeCmd(t, tomorrow)
 		}
 
@@ -815,8 +840,11 @@ func (m Model) renderList() string {
 	if m.syncing {
 		extra = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
 	}
-	if m.focusMode {
+	switch m.filter {
+	case filterFocus:
 		extra += "  " + styleFocusBadge.Render("focus: today & overdue")
+	case filterOverdue:
+		extra += "  " + styleFocusBadge.Render("overdue only")
 	}
 	if m.selecting {
 		extra += "  " + theme.Selected.Render(fmt.Sprintf("select: %d", len(m.selected))) +
@@ -847,8 +875,10 @@ func (m Model) renderList() string {
 		switch {
 		case m.searchQuery() != "":
 			msg = "No tasks match your search."
-		case m.focusMode:
+		case m.filter == filterFocus:
 			msg = "No tasks due today or overdue — press t to show all tasks."
+		case m.filter == filterOverdue:
+			msg = "No overdue tasks — press O to show all tasks."
 		case len(m.tasks) == 0:
 			msg = "No tasks yet — press n to add one, or s to sync with Apple Reminders."
 		default:
@@ -1061,6 +1091,7 @@ func (m Model) helpContent() string {
 	b.WriteString(row("1-9", "jump to the nth visible task"))
 	b.WriteString(row("/", "search tasks (esc clears)"))
 	b.WriteString(row("t", "focus mode — today & overdue only"))
+	b.WriteString(row("O", "filter — overdue only"))
 	b.WriteString(row("c", "show / hide completed tasks"))
 	b.WriteString(section("Tasks"))
 	b.WriteString(row("space", "toggle done"))
@@ -1801,8 +1832,10 @@ func (m Model) searchQuery() string {
 // across non-contiguous positions, fragmenting the "isHeader" grouping
 // this function builds. Fuzzy only widens WHICH tasks match; the original
 // list-grouped order is preserved.
-func buildRows(tasks []models.Task, query string, focusMode bool) []row {
-	eod := endOfDay(time.Now())
+func buildRows(tasks []models.Task, query string, filter listFilterMode) []row {
+	now := time.Now()
+	eod := endOfDay(now)
+	sod := startOfDay(now)
 
 	var titleMatch map[int]bool
 	if query != "" {
@@ -1821,8 +1854,15 @@ func buildRows(tasks []models.Task, query string, focusMode bool) []row {
 	curList := ""
 	for i := range tasks {
 		t := &tasks[i]
-		if focusMode && (t.DueDate == nil || t.DueDate.After(eod)) {
-			continue
+		switch filter {
+		case filterFocus:
+			if t.DueDate == nil || t.DueDate.After(eod) {
+				continue
+			}
+		case filterOverdue:
+			if t.DueDate == nil || !t.DueDate.Before(sod) {
+				continue
+			}
 		}
 		if query != "" && !titleMatch[i] && !strings.Contains(strings.ToLower(t.Notes), query) {
 			continue
