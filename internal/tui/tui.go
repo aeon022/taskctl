@@ -123,6 +123,7 @@ type Model struct {
 	tasks    []models.Task
 	rows     []row
 	cursor   int
+	hoverRow int // m.rows index under the mouse cursor, -1 when none
 	view     view
 	loading  bool
 	syncing  bool
@@ -171,7 +172,7 @@ func newModel() Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 80
-	return Model{loading: true, searchInput: si, sp: sp}
+	return Model{loading: true, searchInput: si, sp: sp, hoverRow: -1}
 }
 
 // ── Init / Update / View ──────────────────────────────────────────────────────
@@ -312,6 +313,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if i := m.rowHitTest(msg.Y); i >= 0 {
 				m.cursor = i
+			}
+		case tea.MouseButtonNone:
+			if msg.Action == tea.MouseActionMotion && m.view == viewList {
+				m.hoverRow = m.rowHitTest(msg.Y)
 			}
 		}
 		return m, nil
@@ -753,8 +758,11 @@ func (m Model) renderList() string {
 			recur = "  " + styleRecur.Render("↻ "+t.Recurrence)
 		}
 		row := fmt.Sprintf("  %s  %s%s%s", mark, line, due, recur)
-		if i == m.cursor {
+		switch {
+		case i == m.cursor:
 			row = styleCursor.Render(row)
+		case i == m.hoverRow:
+			row = theme.Hover.Render(row)
 		}
 		b.WriteString(row + "\n")
 	}
@@ -1601,7 +1609,7 @@ func endOfDay(t time.Time) time.Time {
 
 // Run starts the TUI.
 func Run() error {
-	p := tea.NewProgram(newModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(newModel(), tea.WithAltScreen(), tea.WithMouseAllMotion())
 	_, err := p.Run()
 	return err
 }
