@@ -391,8 +391,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.detailTarget = nil
 			return m, nil
 		case "o":
-			if t != nil && t.URL != "" {
-				return m, openURLCmd(t.URL)
+			if t != nil {
+				if u := effectiveURL(t); u != "" {
+					return m, openURLCmd(u)
+				}
 			}
 		case "p":
 			if t != nil {
@@ -693,8 +695,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case "o":
-		if t := cursorTask(m); t != nil && t.URL != "" {
-			return m, openURLCmd(t.URL)
+		if t := cursorTask(m); t != nil {
+			if u := effectiveURL(t); u != "" {
+				return m, openURLCmd(u)
+			}
 		}
 	}
 	return m, nil
@@ -726,28 +730,54 @@ func (m Model) View() string {
 // ── Render ────────────────────────────────────────────────────────────────────
 
 // renderHeader is the one header shared by every view: app name + current
-// section, so it stays a constant anchor no matter which screen is active.
+// section on the left, the live date right-aligned — a constant anchor no
+// matter which screen is active. Degrades to just the left side if the
+// terminal is too narrow for both.
 func (m Model) renderHeader(section string) string {
-	return "  " + styleHeader.Render("taskctl") + styleSubhead.Render(" · "+section)
+	left := styleHeader.Render("taskctl") + styleSubhead.Render(" · "+section)
+	right := styleSubhead.Render(time.Now().Format("Mon, 02 Jan 2006"))
+	if pad := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2; pad >= 1 {
+		return "  " + left + strings.Repeat(" ", pad) + right
+	}
+	return "  " + left
+}
+
+// renderDivider draws the rule under the header, full terminal width.
+func (m Model) renderDivider() string {
+	return styleSep.Render(strings.Repeat("─", max(0, m.width)))
+}
+
+// groupCounts tallies how many task rows fall under each list-section
+// header in m.rows, for the "(n)" badge next to each list name.
+func (m Model) groupCounts() map[string]int {
+	counts := make(map[string]int)
+	label := ""
+	for _, r := range m.rows {
+		if r.isHeader {
+			label = r.label
+			continue
+		}
+		counts[label]++
+	}
+	return counts
 }
 
 func (m Model) renderList() string {
 	var b strings.Builder
-	b.WriteString("\n")
+	b.WriteString(m.renderHeader("Tasks") + "\n")
+	b.WriteString(m.renderDivider() + "\n")
 
-	status := ""
+	extra := ""
 	if m.syncing {
-		status = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
+		extra = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
 	}
-	focusLabel := ""
 	if m.focusMode {
-		focusLabel = styleOverdue.Render("  [focus: today & overdue]")
+		extra += styleOverdue.Render("  [focus: today & overdue]")
 	}
-	selectLabel := ""
 	if m.selecting {
-		selectLabel = styleSelected.Render(fmt.Sprintf("  [select: %d]  space toggle  A all  enter done  d delete  esc cancel", len(m.selected)))
+		extra += styleSelected.Render(fmt.Sprintf("  [select: %d]  space toggle  A all  enter done  d delete  esc cancel", len(m.selected)))
 	}
-	b.WriteString(m.renderHeader("Tasks") + status + focusLabel + selectLabel + "\n\n")
+	b.WriteString(extra + "\n")
 
 	if m.searching {
 		b.WriteString("  " + styleKey.Render("/") + " " + m.searchInput.View() + "  (enter/esc to close)\n\n")
@@ -770,6 +800,7 @@ func (m Model) renderList() string {
 	if m.searching {
 		listHeight -= 2
 	}
+	counts := m.groupCounts()
 	visible, start := m.visibleRowsWithStart(listHeight)
 	for localI, r := range visible {
 		i := start + localI
@@ -777,7 +808,8 @@ func (m Model) renderList() string {
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString("  " + styleHeader.Render(r.label) + "\n")
+			badge := styleSubhead.Render(fmt.Sprintf(" (%d)", counts[r.label]))
+			b.WriteString("  " + styleHeader.Render(r.label) + badge + "\n")
 			b.WriteString("  " + styleSep.Render(strings.Repeat("─", len(r.label)+2)) + "\n")
 			continue
 		}
@@ -832,7 +864,7 @@ func (m Model) renderList() string {
 			recur = "  " + styleRecur.Render("↻ "+t.Recurrence)
 		}
 		link := ""
-		if t.URL != "" {
+		if effectiveURL(t) != "" {
 			link = "  " + styleRecur.Render("🔗")
 		}
 		row := fmt.Sprintf("  %s  %s%s%s%s", mark, line, due, recur, link)
@@ -1020,15 +1052,18 @@ func (m Model) renderDetailPopup() string {
 	case 5:
 		b.WriteString(label("Priority") + "medium\n")
 	}
+	url := effectiveURL(t)
 	if t.URL != "" {
 		b.WriteString(label("URL") + styleDue.Render(t.URL) + "\n")
+	} else if url != "" {
+		b.WriteString(label("URL") + styleDue.Render(url) + styleSubhead.Render(" (from notes)") + "\n")
 	}
 	if t.Notes != "" {
 		b.WriteString("\n" + label("Notes") + "\n" + t.Notes + "\n")
 	}
 
 	footer := "e edit  d delete  p pomodoro"
-	if t.URL != "" {
+	if url != "" {
 		footer = "o open url  " + footer
 	}
 	footer += "  esc/enter close"
@@ -1131,7 +1166,7 @@ func (m Model) renderForm() string {
 
 	key := func(k string) string { return styleKey.Render(k) }
 	var b strings.Builder
-	b.WriteString("\n" + m.renderHeader(heading) + "\n\n")
+	b.WriteString(m.renderHeader(heading) + "\n" + m.renderDivider() + "\n\n")
 	b.WriteString(styleBox.Render(inner.String()))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("  %s next  %s next/save  %s save  %s cancel\n",
@@ -1191,7 +1226,7 @@ func (m Model) renderPomodoro() string {
 
 func (m Model) renderStats() string {
 	var b strings.Builder
-	b.WriteString("\n" + m.renderHeader("Stats") + "\n\n")
+	b.WriteString(m.renderHeader("Stats") + "\n" + m.renderDivider() + "\n\n")
 	b.WriteString("  " + styleHeader.Render("Productivity") + "\n\n")
 
 	if m.statsData == nil {
@@ -1379,6 +1414,41 @@ func openURLCmd(url string) tea.Cmd {
 		_ = exec.Command("open", url).Start()
 		return nil
 	}
+}
+
+// effectiveURL returns t.URL if Apple actually gave us one, otherwise the
+// first link found in Notes. Reminders.app's dedicated "URL" field (visible
+// in its UI) currently isn't readable via either AppleScript or EventKit on
+// this macOS/Reminders version — confirmed by direct testing, not a taskctl
+// bug — so a link pasted into Notes is the only reliable way a URL survives
+// the round trip. Falling back to it here means "o" / the 🔗 indicator still
+// work for anyone who puts their link in Notes instead.
+func effectiveURL(t *models.Task) string {
+	if t.URL != "" {
+		return t.URL
+	}
+	return firstURL(t.Notes)
+}
+
+// firstURL returns the first http(s):// link found in s, or "".
+func firstURL(s string) string {
+	lower := strings.ToLower(s)
+	hi := strings.Index(lower, "https://")
+	if hi < 0 {
+		hi = strings.Index(lower, "http://")
+	}
+	if hi < 0 {
+		return ""
+	}
+	url := s[hi:]
+	for i, r := range url {
+		if r == ' ' || r == '\n' || r == '\r' || r == '\t' ||
+			r == '<' || r == '>' || r == '"' || r == '\'' || r == ')' {
+			url = url[:i]
+			break
+		}
+	}
+	return url
 }
 
 func providerDelete(t *models.Task)                      { _ = reminders.DeleteTask(t) }
