@@ -605,11 +605,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		// jump to the nth visible (on-screen) task row, headers not counted
 		n := int(msg.String()[0] - '0')
-		listHeight := m.height - 5 - m.statusBarHeight()
-		if m.searching {
-			listHeight -= 2
-		}
-		visible, start := m.visibleRowsWithStart(listHeight)
+		visible, start := m.visibleRowsWithStart(m.listHeight())
 		count := 0
 		for i, r := range visible {
 			if r.isHeader {
@@ -860,17 +856,17 @@ func (m Model) renderList() string {
 		extra += "  " + theme.Selected.Render(fmt.Sprintf("select: %d", len(m.selected))) +
 			styleSubhead.Render("  space toggle  A all  enter done  d delete  esc cancel")
 	}
-	b.WriteString(extra + "\n")
+	// Blank line always follows, even when extra is empty — otherwise a
+	// non-empty summary/badge line here sits flush against the first list
+	// header right below it.
+	b.WriteString(extra + "\n\n")
 
 	if m.searching {
 		b.WriteString("  " + styleKey.Render("/") + " " + m.searchInput.View() + "  (enter/esc to close)\n\n")
 	}
 
 	query := m.searchQuery()
-	listHeight := m.height - 5 - m.statusBarHeight()
-	if m.searching {
-		listHeight -= 2
-	}
+	listHeight := m.listHeight()
 	counts := m.groupCounts()
 	listColors := make(map[string]string, len(m.listEntries))
 	for _, e := range m.listEntries {
@@ -1054,20 +1050,19 @@ func (m Model) visibleRowsWithStart(height int) ([]row, int) {
 
 // rowHitTest returns the m.rows index at screen row y, or -1 if the click
 // missed (landed on a section header, blank line, or outside the list).
-// Mirrors the exact line-counting renderList uses: 1 blank line, the header
-// line + blank, an optional 2-line search bar, then each row consumes 1
-// line — except section headers, which consume 2 lines (label + rule),
-// plus a leading blank line for every header after the first. Walks the
-// same scroll window renderList computes, so a click lands on the row
-// it visually appears to be over even once the list has scrolled.
+// Mirrors the exact line-counting renderList uses: header, divider,
+// extra/summary line, its trailing blank line (4 lines, hence row := 4),
+// then an optional 2-line search bar, then each row consumes 1 line —
+// except section headers, which consume 2 lines (label + rule), plus a
+// leading blank line for every header after the first. Walks the same
+// scroll window renderList computes, so a click lands on the row it
+// visually appears to be over even once the list has scrolled.
 func (m Model) rowHitTest(y int) int {
-	row := 3
-	listHeight := m.height - 5 - m.statusBarHeight()
+	row := 4
 	if m.searching {
 		row += 2
-		listHeight -= 2
 	}
-	visible, start := m.visibleRowsWithStart(listHeight)
+	visible, start := m.visibleRowsWithStart(m.listHeight())
 	for localI, r := range visible {
 		i := start + localI
 		if r.isHeader {
@@ -1268,6 +1263,21 @@ func (m Model) statusBarHeight() int {
 		return 1
 	}
 	return 2
+}
+
+// listHeight is the line budget available for task rows. The "6" is the
+// fixed overhead empirically verified against the rendered output: header,
+// divider, extra/summary line, the blank breathing-room line now after it,
+// plus the pre-footer blank line and one more line of slack accounted for
+// by testing rather than a clean derivation from the render calls alone.
+// Changing anything in that fixed top/bottom block requires re-checking
+// this against an actual render (see rowHitTest's matching row := 4).
+func (m Model) listHeight() int {
+	h := m.height - 6 - m.statusBarHeight()
+	if m.searching {
+		h -= 2
+	}
+	return h
 }
 
 func (m Model) renderForm() string {
