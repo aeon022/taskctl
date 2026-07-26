@@ -119,6 +119,8 @@ var (
 	styleImportant  = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 	styleSelected   = lipgloss.NewStyle().Foreground(colorGreen)
 	styleFocusBadge = lipgloss.NewStyle().Background(colorRed).Foreground(theme.SelectedFg).Padding(0, 1)
+	styleCountBadge = lipgloss.NewStyle().Foreground(colorMuted).Background(theme.HoverBg).Padding(0, 1)
+	styleTitleBar   = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectedFg).Background(colorBlue)
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -795,6 +797,37 @@ func (m Model) renderDivider() string {
 
 // groupCounts tallies how many task rows fall under each list-section
 // header in m.rows, for the "(n)" badge next to each list name.
+// todaySummary is an at-a-glance "N due today · N overdue" for the header
+// area, computed across all tasks regardless of the current filter/focus
+// mode. Empty when there's nothing due or overdue, so a clean day stays
+// clean rather than showing "0 due today".
+func (m Model) todaySummary() string {
+	now := time.Now()
+	var dueToday, overdue int
+	for _, t := range m.tasks {
+		if t.Done() || t.DueDate == nil {
+			continue
+		}
+		switch {
+		case t.DueDate.Before(startOfDay(now)):
+			overdue++
+		case !t.DueDate.After(endOfDay(now)):
+			dueToday++
+		}
+	}
+	if dueToday == 0 && overdue == 0 {
+		return ""
+	}
+	var parts []string
+	if dueToday > 0 {
+		parts = append(parts, styleToday.Render(fmt.Sprintf("%d due today", dueToday)))
+	}
+	if overdue > 0 {
+		parts = append(parts, styleOverdue.Render(fmt.Sprintf("%d overdue", overdue)))
+	}
+	return strings.Join(parts, styleSubhead.Render(" · "))
+}
+
 func (m Model) groupCounts() map[string]int {
 	counts := make(map[string]int)
 	label := ""
@@ -814,8 +847,11 @@ func (m Model) renderList() string {
 	b.WriteString(m.renderDivider() + "\n")
 
 	extra := ""
+	if s := m.todaySummary(); s != "" {
+		extra = "  " + s
+	}
 	if m.syncing {
-		extra = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
+		extra += "  " + m.sp.View() + styleSubhead.Render(" syncing…")
 	}
 	if m.focusMode {
 		extra += "  " + styleFocusBadge.Render("focus: today & overdue")
@@ -830,18 +866,6 @@ func (m Model) renderList() string {
 		b.WriteString("  " + styleKey.Render("/") + " " + m.searchInput.View() + "  (enter/esc to close)\n\n")
 	}
 
-	if len(m.rows) == 0 {
-		switch {
-		case m.searchQuery() != "":
-			b.WriteString("  No tasks match your search.\n")
-		case m.focusMode:
-			b.WriteString("  No tasks due today or overdue — press t to show all tasks.\n")
-		case len(m.tasks) == 0:
-			b.WriteString("  No tasks yet — press n to add one, or s to sync with Apple Reminders.\n")
-		default:
-			b.WriteString("  No tasks found.\n")
-		}
-	}
 	query := m.searchQuery()
 	listHeight := m.height - 5 - m.statusBarHeight()
 	if m.searching {
@@ -854,8 +878,33 @@ func (m Model) renderList() string {
 			listColors[e.Name] = e.Color
 		}
 	}
-	visible, start := m.visibleRowsWithStart(listHeight)
+
 	linesWritten := 0
+	if len(m.rows) == 0 {
+		var msg string
+		switch {
+		case m.searchQuery() != "":
+			msg = "No tasks match your search."
+		case m.focusMode:
+			msg = "No tasks due today or overdue — press t to show all tasks."
+		case len(m.tasks) == 0:
+			msg = "No tasks yet — press n to add one, or s to sync with Apple Reminders."
+		default:
+			msg = "No tasks found."
+		}
+		// Vertically center in the space the footer's fixed-bottom padding
+		// (below) leaves available, instead of sitting flush at the top
+		// with a dead void beneath it.
+		for topPad := max(0, (listHeight-1)/2); topPad > 0; topPad-- {
+			b.WriteString("\n")
+			linesWritten++
+		}
+		centered := lipgloss.NewStyle().Width(max(0, m.width)).Align(lipgloss.Center).Render(styleSubhead.Render(msg))
+		b.WriteString(centered + "\n")
+		linesWritten++
+	}
+
+	visible, start := m.visibleRowsWithStart(listHeight)
 	for localI, r := range visible {
 		i := start + localI
 		if r.isHeader {
@@ -863,7 +912,7 @@ func (m Model) renderList() string {
 				b.WriteString("\n")
 				linesWritten++
 			}
-			badge := styleSubhead.Render(fmt.Sprintf(" (%d)", counts[r.label]))
+			badge := " " + styleCountBadge.Render(fmt.Sprintf("%d", counts[r.label]))
 			bullet := ""
 			if c := listColors[r.label]; c != "" {
 				bullet = lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("● ")
@@ -931,14 +980,26 @@ func (m Model) renderList() string {
 		}
 		link := ""
 		if effectiveURL(t) != "" {
-			link = "  " + styleRecur.Render("🔗")
+			link = "  " + styleRecur.Render("↗")
 		}
-		row := fmt.Sprintf("  %s  %s%s%s%s", mark, line, due, recur, link)
+		// One leading column is reserved for the cursor's list-color accent
+		// bar, applied outside styleCursor.Render() below — nesting an
+		// already-colored glyph inside that call would clobber its color
+		// (same hazard noted above for the cursor row's title).
+		row := fmt.Sprintf(" %s  %s%s%s%s", mark, line, due, recur, link)
+		prefix := " "
 		switch {
 		case i == m.cursor:
-			row = styleCursor.Render(row)
+			barStyle := lipgloss.NewStyle().Foreground(colorBlue)
+			if c := listColors[t.List]; c != "" {
+				barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(c))
+			}
+			prefix = barStyle.Render("▎")
+			row = prefix + styleCursor.Render(row)
 		case i == m.hoverRow:
-			row = theme.Hover.Render(row)
+			row = prefix + theme.Hover.Render(row)
+		default:
+			row = prefix + row
 		}
 		b.WriteString(row + "\n")
 		linesWritten++
@@ -1073,7 +1134,7 @@ func (m Model) openHelp() Model {
 		popW = 40
 	}
 
-	vp := viewport.New(popW-6, popH-5) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for footer
+	vp := viewport.New(popW-6, popH-6) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for title bar, -1 for footer
 	vp.SetContent(m.helpContent())
 
 	m.helpVP = vp
@@ -1093,7 +1154,8 @@ func (m Model) renderHelpPopup() string {
 	if m.helpVP.TotalLineCount() > m.helpVP.Height {
 		footer = fmt.Sprintf("j/k scroll (%d%%)  ·  %s", int(m.helpVP.ScrollPercent()*100), footer)
 	}
-	body := m.helpVP.View() + "\n" + styleSubhead.Render(footer)
+	titleBar := styleTitleBar.Width(max(0, m.helpPopW-6)).Render(" Help")
+	body := titleBar + "\n" + m.helpVP.View() + "\n" + styleSubhead.Render(footer)
 	return stylePopupBorder.Width(m.helpPopW).Render(body)
 }
 
@@ -1112,10 +1174,11 @@ func (m Model) renderDetailPopup() string {
 		popW = 40
 	}
 	// inner content width: popW minus the border box's own padding+border
-	rule := styleSep.Render(strings.Repeat("─", max(0, popW-6)))
+	innerW := max(0, popW-6)
+	rule := styleSep.Render(strings.Repeat("─", innerW))
 
 	var b strings.Builder
-	b.WriteString(styleHeader.Render(t.Title) + "\n" + rule + "\n")
+	b.WriteString(styleTitleBar.Width(innerW).Render(" "+t.Title) + "\n" + rule + "\n")
 	b.WriteString(label("List") + t.List + "\n")
 	status := "open"
 	if t.Done() {
