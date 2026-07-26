@@ -337,12 +337,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Action != tea.MouseActionPress || m.view != viewList {
 				return m, nil
 			}
-			if i := m.rowHitTest(msg.Y); i >= 0 {
+			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 {
 				m.cursor = i
 			}
 		case tea.MouseButtonNone:
 			if msg.Action == tea.MouseActionMotion && m.view == viewList {
-				m.hoverRow = m.rowHitTest(msg.Y)
+				m.hoverRow = m.rowHitTest(msg.Y - appPadV)
 			}
 		}
 		return m, nil
@@ -736,27 +736,41 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// appPadV/appPadH inset the whole app from the terminal edges (matching
+// notectl's request for breathing room). Applied by shrinking the model's
+// effective width/height before any sub-render runs, then wrapping the
+// result in a matching lipgloss.Padding — so every width/height computation
+// downstream (dividers, popup sizing, listHeight) already accounts for it.
+// Mouse Y coordinates need the same offset subtracted; see the
+// tea.MouseMsg case in Update.
+const appPadV, appPadH = 1, 2
+
 func (m Model) View() string {
 	if m.loading {
 		return "\n  " + m.sp.View() + styleSubhead.Render(" Loading tasks…") + "\n"
 	}
+	m.width -= appPadH * 2
+	m.height -= appPadV * 2
+
+	var content string
 	switch m.view {
 	case viewCreate:
-		return m.renderForm()
+		content = m.renderForm()
 	case viewPomodoro:
-		return overlay.Center(m.renderList(), m.renderPomodoro(), m.width, m.height, 0)
+		content = overlay.Center(m.renderList(), m.renderPomodoro(), m.width, m.height, 0)
 	case viewStats:
-		return m.renderStats()
+		content = m.renderStats()
 	case viewHelp:
 		// "?" is only reachable from the main list, so the list is always
 		// the correct background to keep visible behind the popup. No
 		// enclosing border on the list view, so inset 0 is safe.
-		return overlay.Center(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
+		content = overlay.Center(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
 	case viewDetail:
-		return overlay.Center(m.renderList(), m.renderDetailPopup(), m.width, m.height, 0)
+		content = overlay.Center(m.renderList(), m.renderDetailPopup(), m.width, m.height, 0)
 	default:
-		return m.renderList()
+		content = m.renderList()
 	}
+	return lipgloss.NewStyle().Padding(appPadV, appPadH).Render(content)
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
