@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,7 @@ var todayCmd = &cobra.Command{
 
 		eod := endOfDay(time.Now())
 		var due, overdue []string
+		var dueTasks []models.Task
 		curList := ""
 		lines := []string{}
 
@@ -34,6 +36,7 @@ var todayCmd = &cobra.Command{
 			if t.DueDate == nil || t.DueDate.After(eod) {
 				continue
 			}
+			dueTasks = append(dueTasks, t)
 			prefix := "○"
 			if t.DueDate.Before(startOfDay(time.Now())) {
 				prefix = "!"
@@ -60,7 +63,7 @@ var todayCmd = &cobra.Command{
 			outputJSON(map[string]any{
 				"tool": "taskctl", "command": "today",
 				"overdue": len(overdue), "due_today": len(due),
-				"data": tasks,
+				"data": dueTasks,
 			})
 			return nil
 		}
