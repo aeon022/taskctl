@@ -159,8 +159,124 @@ end tell`
 	return entries, nil
 }
 
-// CreateTask creates a new reminder in Apple Reminders.
+// createReminderScript creates one reminder via EventKit, including its
+// native url field. AppleScript's `set url of reminder` fails with -10006
+// ("can't set that property") on this Reminders version — confirmed by
+// direct testing — even though EventKit reads and writes r.url just fine.
+// Args: <list> <title> <due-iso-or-empty> <notes> <url> <priority>
+const createReminderScript = `#!/usr/bin/swift
+import EventKit
+import Foundation
+
+let args = CommandLine.arguments
+guard args.count >= 7 else {
+    fputs("usage: create_reminder.swift <list> <title> <due-iso> <notes> <url> <priority>\n", stderr)
+    exit(1)
+}
+let listName = args[1]
+let title    = args[2]
+let dueISO   = args[3]
+let notes    = args[4]
+let urlStr   = args[5]
+let priority = Int(args[6]) ?? 0
+
+let store = EKEventStore()
+let sema = DispatchSemaphore(value: 0)
+var exitCode: Int32 = 0
+
+store.requestFullAccessToReminders { granted, err in
+    guard granted else {
+        fputs("Reminders access denied: \(String(describing: err))\n", stderr)
+        exitCode = 1
+        sema.signal()
+        return
+    }
+    guard let cal = store.calendars(for: .reminder).first(where: { $0.title == listName }) else {
+        fputs("list not found: \(listName)\n", stderr)
+        exitCode = 1
+        sema.signal()
+        return
+    }
+
+    let r = EKReminder(eventStore: store)
+    r.title = title
+    r.calendar = cal
+    if !notes.isEmpty { r.notes = notes }
+    if !urlStr.isEmpty { r.url = URL(string: urlStr) }
+    if priority > 0 { r.priority = priority }
+
+    if !dueISO.isEmpty {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        df.timeZone = TimeZone.current
+        if let d = df.date(from: dueISO) {
+            r.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: d)
+        }
+    }
+
+    do {
+        try store.save(r, commit: true)
+        print("OK")
+    } catch {
+        fputs("save error: \(error)\n", stderr)
+        exitCode = 1
+    }
+    sema.signal()
+}
+sema.wait()
+exit(exitCode)
+`
+
+func createScriptPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "taskctl", "create_reminder.swift")
+}
+
+func ensureCreateScript() (string, error) {
+	p := createScriptPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		return "", err
+	}
+	existing, _ := os.ReadFile(p)
+	if string(existing) != createReminderScript {
+		if err := os.WriteFile(p, []byte(createReminderScript), 0644); err != nil {
+			return "", err
+		}
+	}
+	return p, nil
+}
+
+// CreateTask creates a new reminder in Apple Reminders, preferring EventKit
+// so the url field actually survives the round trip (see createReminderScript).
 func CreateTask(t *models.Task) error {
+	if _, err := exec.LookPath("swift"); err == nil {
+		if script, err := ensureCreateScript(); err == nil {
+			return createViaEventKit(script, t)
+		}
+	}
+	return createViaAppleScript(t)
+}
+
+func createViaEventKit(script string, t *models.Task) error {
+	listName := t.List
+	if listName == "" {
+		listName = DefaultList()
+	}
+	due := ""
+	if t.DueDate != nil {
+		due = t.DueDate.Format("2006-01-02T15:04:05")
+	}
+	cmd := exec.Command("swift", script, listName, t.Title, due, t.Notes, t.URL, fmt.Sprintf("%d", t.Priority))
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("swift: %s", string(exitErr.Stderr))
+		}
+		return err
+	}
+	return nil
+}
+
+func createViaAppleScript(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
 		listName = DefaultList()
@@ -178,10 +294,10 @@ func CreateTask(t *models.Task) error {
 	if t.Priority > 0 {
 		prioLine = fmt.Sprintf(`set priority of newTask to %d`, t.Priority)
 	}
-	urlLine := ""
-	if t.URL != "" {
-		urlLine = fmt.Sprintf(`set url of newTask to "%s"`, escapeAS(t.URL))
-	}
+	// url intentionally omitted: AppleScript can't set it (-10006). This
+	// path only runs when swift is unavailable, so a URL entered here
+	// silently won't reach Apple — CreateTask prefers EventKit for exactly
+	// this reason.
 	script := fmt.Sprintf(`
 tell application "Reminders"
 	set theList to list "%s"
@@ -189,9 +305,8 @@ tell application "Reminders"
 	%s
 	%s
 	%s
-	%s
 end tell
-`, escapeAS(listName), escapeAS(t.Title), dueLine, notesLine, prioLine, urlLine)
+`, escapeAS(listName), escapeAS(t.Title), dueLine, notesLine, prioLine)
 	_, err := runAppleScript(script)
 	return err
 }

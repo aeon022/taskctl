@@ -1416,13 +1416,11 @@ func openURLCmd(url string) tea.Cmd {
 	}
 }
 
-// effectiveURL returns t.URL if Apple actually gave us one, otherwise the
-// first link found in Notes. Reminders.app's dedicated "URL" field (visible
-// in its UI) currently isn't readable via either AppleScript or EventKit on
-// this macOS/Reminders version — confirmed by direct testing, not a taskctl
-// bug — so a link pasted into Notes is the only reliable way a URL survives
-// the round trip. Falling back to it here means "o" / the 🔗 indicator still
-// work for anyone who puts their link in Notes instead.
+// effectiveURL returns t.URL if set, otherwise the first link found in
+// Notes — a fallback for reminders where someone pasted a link into the
+// notes text instead of using the dedicated URL field. The url field itself
+// round-trips fine via EventKit (reminders.CreateTask uses it); it's only
+// AppleScript that can't write it, which is why creation prefers EventKit.
 func effectiveURL(t *models.Task) string {
 	if t.URL != "" {
 		return t.URL
