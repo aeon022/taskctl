@@ -841,11 +841,13 @@ func (m Model) renderList() string {
 		}
 	}
 	visible, start := m.visibleRowsWithStart(listHeight)
+	linesWritten := 0
 	for localI, r := range visible {
 		i := start + localI
 		if r.isHeader {
 			if i > 0 {
 				b.WriteString("\n")
+				linesWritten++
 			}
 			badge := styleSubhead.Render(fmt.Sprintf(" (%d)", counts[r.label]))
 			bullet := ""
@@ -854,6 +856,7 @@ func (m Model) renderList() string {
 			}
 			b.WriteString("  " + bullet + styleHeader.Render(r.label) + badge + "\n")
 			b.WriteString("  " + styleSep.Render(strings.Repeat("─", max(0, m.width-2))) + "\n")
+			linesWritten += 2
 			continue
 		}
 		t := r.task
@@ -924,6 +927,14 @@ func (m Model) renderList() string {
 			row = theme.Hover.Render(row)
 		}
 		b.WriteString(row + "\n")
+		linesWritten++
+	}
+
+	// Pin the footer to the bottom of the screen instead of letting it
+	// glue itself right under a short list — pad the body out to its
+	// full line budget first, matching notectl's fixed-height list pane.
+	for ; linesWritten < listHeight; linesWritten++ {
+		b.WriteString("\n")
 	}
 
 	if m.lastDeleted != nil {
