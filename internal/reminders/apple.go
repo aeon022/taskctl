@@ -43,6 +43,7 @@ store.requestFullAccessToReminders { granted, _ in
             let done      = r.isCompleted ? "1" : "0"
             let uid       = r.calendarItemExternalIdentifier ?? ""
             let priority  = r.priority
+            let url       = r.url?.absoluteString ?? ""
 
             var dueStr = ""
             if let dc = r.dueDateComponents,
@@ -57,7 +58,7 @@ store.requestFullAccessToReminders { granted, _ in
                 completedStr = iso.string(from: cd)
             }
 
-            print("TITLE:\(title)\nLIST:\(list)\nNOTES:\(notes)\nDONE:\(done)\nUID:\(uid)\nDUE:\(dueStr)\nPRIORITY:\(priority)\nCOMPLETED:\(completedStr)\n---TASK---")
+            print("TITLE:\(title)\nLIST:\(list)\nNOTES:\(notes)\nURL:\(url)\nDONE:\(done)\nUID:\(uid)\nDUE:\(dueStr)\nPRIORITY:\(priority)\nCOMPLETED:\(completedStr)\n---TASK---")
         }
         sema.signal()
     }
@@ -177,6 +178,10 @@ func CreateTask(t *models.Task) error {
 	if t.Priority > 0 {
 		prioLine = fmt.Sprintf(`set priority of newTask to %d`, t.Priority)
 	}
+	urlLine := ""
+	if t.URL != "" {
+		urlLine = fmt.Sprintf(`set url of newTask to "%s"`, escapeAS(t.URL))
+	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
 	set theList to list "%s"
@@ -184,8 +189,9 @@ tell application "Reminders"
 	%s
 	%s
 	%s
+	%s
 end tell
-`, escapeAS(listName), escapeAS(t.Title), dueLine, notesLine, prioLine)
+`, escapeAS(listName), escapeAS(t.Title), dueLine, notesLine, prioLine, urlLine)
 	_, err := runAppleScript(script)
 	return err
 }
@@ -312,6 +318,10 @@ tell application "Reminders"
 		try
 			if body of r is not missing value then set rNotes to body of r
 		end try
+		set rURL to ""
+		try
+			if url of r is not missing value then set rURL to url of r
+		end try
 		set rDone to "0"
 		if completed of r then set rDone to "1"
 		set rDue to ""
@@ -321,7 +331,7 @@ tell application "Reminders"
 				set rDue to ((year of d) as text) & "-"
 			end if
 		end try
-		set output to output & "TITLE:" & rTitle & "\nLIST:" & rList & "\nNOTES:" & rNotes & "\nDONE:" & rDone & "\nUID:\nDUE:" & rDue & "\nPRIORITY:0\nCOMPLETED:\n---TASK---\n"
+		set output to output & "TITLE:" & rTitle & "\nLIST:" & rList & "\nNOTES:" & rNotes & "\nURL:" & rURL & "\nDONE:" & rDone & "\nUID:\nDUE:" & rDue & "\nPRIORITY:0\nCOMPLETED:\n---TASK---\n"
 	end repeat
 	return output
 end tell
@@ -360,6 +370,8 @@ func parseTasks(raw string) []models.Task {
 				t.List = val
 			case "NOTES":
 				t.Notes = val
+			case "URL":
+				t.URL = val
 			case "DONE":
 				if val == "1" {
 					t.Status = "completed"

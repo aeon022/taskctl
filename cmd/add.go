@@ -18,6 +18,7 @@ var (
 	addList  string
 	addDue   string
 	addNotes string
+	addURL   string
 )
 
 var addCmd = &cobra.Command{
@@ -35,6 +36,7 @@ var addCmd = &cobra.Command{
 			Title:     args[0],
 			List:      list,
 			Notes:     addNotes,
+			URL:       addURL,
 			Status:    "needsAction",
 			Source:    "taskctl",
 			CreatedAt: time.Now(),
@@ -77,5 +79,6 @@ func init() {
 	addCmd.Flags().StringVar(&addList, "list", "", "Reminder list (default: config default_list, else system default)")
 	addCmd.Flags().StringVar(&addDue, "due", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringVar(&addNotes, "notes", "", "Notes")
+	addCmd.Flags().StringVar(&addURL, "url", "", "URL")
 	rootCmd.AddCommand(addCmd)
 }

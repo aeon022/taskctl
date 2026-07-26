@@ -65,6 +65,7 @@ func toolCreateTask() mcp.Tool {
 		mcp.WithString("list", mcp.Description("Reminder list name")),
 		mcp.WithString("due_date", mcp.Description("Due date in YYYY-MM-DD format")),
 		mcp.WithString("notes", mcp.Description("Optional notes")),
+		mcp.WithString("url", mcp.Description("Optional URL to attach to the task")),
 	)
 }
 
@@ -199,6 +200,7 @@ func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	listName := req.GetString("list", "")
 	dueStr := req.GetString("due_date", "")
 	notes := req.GetString("notes", "")
+	url := req.GetString("url", "")
 
 	if title == "" {
 		return mcp.NewToolResultError("title is required"), nil
@@ -212,6 +214,7 @@ func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 		Title:     title,
 		List:      listName,
 		Notes:     notes,
+		URL:       url,
 		Status:    "needsAction",
 		Source:    "taskctl",
 		CreatedAt: time.Now(),
@@ -333,7 +336,11 @@ func formatTasks(tasks []models.Task, heading string) string {
 		if t.DueDate != nil {
 			due = "  (due " + t.DueDate.Format("Mon Jan 02") + ")"
 		}
-		b.WriteString(fmt.Sprintf("  %s %s%s\n", mark, t.Title, due))
+		url := ""
+		if t.URL != "" {
+			url = "  " + t.URL
+		}
+		b.WriteString(fmt.Sprintf("  %s %s%s%s\n", mark, t.Title, due, url))
 	}
 	return b.String()
 }

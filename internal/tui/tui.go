@@ -43,11 +43,12 @@ const (
 	fList       = 1
 	fDue        = 2
 	fNotes      = 3
-	fRecurrence = 4
-	fCount      = 5
+	fURL        = 4
+	fRecurrence = 5
+	fCount      = 6
 )
 
-var formLabels = [fCount]string{"Title", "List", "Due", "Notes", "Repeat (daily/weekly/monthly)"}
+var formLabels = [fCount]string{"Title", "List", "Due", "Notes", "URL", "Repeat (daily/weekly/monthly)"}
 
 const pomodoroDuration = 25 * time.Minute
 
@@ -636,6 +637,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if t := cursorTask(m); t != nil {
 			m.deleteTarget = t
 		}
+
+	case "o":
+		if t := cursorTask(m); t != nil && t.URL != "" {
+			return m, openURLCmd(t.URL)
+		}
 	}
 	return m, nil
 }
@@ -767,7 +773,11 @@ func (m Model) renderList() string {
 		if t.Recurrence != "" {
 			recur = "  " + styleRecur.Render("↻ "+t.Recurrence)
 		}
-		row := fmt.Sprintf("  %s  %s%s%s", mark, line, due, recur)
+		link := ""
+		if t.URL != "" {
+			link = "  " + styleRecur.Render("🔗")
+		}
+		row := fmt.Sprintf("  %s  %s%s%s%s", mark, line, due, recur, link)
 		switch {
 		case i == m.cursor:
 			row = styleCursor.Render(row)
@@ -870,6 +880,7 @@ func (m Model) helpContent() string {
 	b.WriteString(row("n", "new task"))
 	b.WriteString(row("e", "edit task"))
 	b.WriteString(row("d", "delete task (asks to confirm)"))
+	b.WriteString(row("o", "open task URL in browser"))
 	b.WriteString(row("S", "postpone to tomorrow"))
 	b.WriteString(row("u", "undo last action"))
 	b.WriteString(section("Batch & Extras"))
@@ -1186,6 +1197,7 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 		listName := strings.TrimSpace(inputs[fList].Value())
 		dueStr := strings.TrimSpace(inputs[fDue].Value())
 		notes := strings.TrimSpace(inputs[fNotes].Value())
+		url := strings.TrimSpace(inputs[fURL].Value())
 		recurrence := strings.ToLower(strings.TrimSpace(inputs[fRecurrence].Value()))
 
 		t := &models.Task{
@@ -1194,6 +1206,7 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 			Priority:   priority,
 			List:       listName,
 			Notes:      notes,
+			URL:        url,
 			Recurrence: recurrence,
 			Status:     "needsAction",
 			Source:     "taskctl",
@@ -1228,6 +1241,14 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 		go providerCreate(t)
 
 		return taskSavedMsg{}
+	}
+}
+
+// openURLCmd opens a URL in the default browser (macOS).
+func openURLCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		_ = exec.Command("open", url).Start()
+		return nil
 	}
 }
 
@@ -1290,6 +1311,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 				Title:      taskCopy.Title,
 				List:       taskCopy.List,
 				Notes:      taskCopy.Notes,
+				URL:        taskCopy.URL,
 				Recurrence: taskCopy.Recurrence,
 				Status:     "needsAction",
 				Source:     "taskctl",
@@ -1541,6 +1563,7 @@ func newFormInputs(defaultList string) [fCount]textinput.Model {
 		defaultList,
 		"morgen, nächsten montag, 2026-07-05",
 		"optional notes",
+		"https://…",
 		"daily / weekly / monthly",
 	}
 	for i := range inputs {
@@ -1563,6 +1586,7 @@ func prefillForm(t *models.Task) [fCount]textinput.Model {
 		inputs[fDue].SetValue(t.DueDate.Format("2006-01-02"))
 	}
 	inputs[fNotes].SetValue(t.Notes)
+	inputs[fURL].SetValue(t.URL)
 	inputs[fRecurrence].SetValue(t.Recurrence)
 	return inputs
 }

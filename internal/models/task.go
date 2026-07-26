@@ -14,6 +14,7 @@ type Task struct {
 	Title       string     `json:"title"`
 	List        string     `json:"list"`
 	Notes       string     `json:"notes"`
+	URL         string     `json:"url"` // matches EKReminder.url / Reminders.app's own URL field
 	Status      string     `json:"status"` // "needsAction" | "completed"
 	DueDate     *time.Time `json:"due_date,omitempty"`
 	Priority    int        `json:"priority"` // 0=none, 1=high, 5=medium, 9=low

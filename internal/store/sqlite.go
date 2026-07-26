@@ -30,6 +30,7 @@ func (s *Store) migrate() error {
 			title        TEXT NOT NULL,
 			list         TEXT NOT NULL DEFAULT '',
 			notes        TEXT NOT NULL DEFAULT '',
+			url          TEXT NOT NULL DEFAULT '',
 			status       TEXT NOT NULL DEFAULT 'needsAction',
 			due_date     TEXT,
 			priority     INTEGER NOT NULL DEFAULT 0,
@@ -68,6 +69,7 @@ func (s *Store) migrate() error {
 	}
 	// add columns to existing tables (ignored if already present)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN recurrence TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN url TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE lists ADD COLUMN provider TEXT NOT NULL DEFAULT 'apple'`)
 	return nil
 }
@@ -83,15 +85,15 @@ func (s *Store) UpsertTask(ctx context.Context, t *models.Task) error {
 		completedAt = &v
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO tasks (id,title,list,notes,status,due_date,priority,recurrence,external_id,source,created_at,updated_at,completed_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO tasks (id,title,list,notes,url,status,due_date,priority,recurrence,external_id,source,created_at,updated_at,completed_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
-			title=excluded.title, list=excluded.list, notes=excluded.notes,
+			title=excluded.title, list=excluded.list, notes=excluded.notes, url=excluded.url,
 			status=excluded.status, due_date=excluded.due_date, priority=excluded.priority,
 			recurrence=excluded.recurrence,
 			updated_at=excluded.updated_at, completed_at=excluded.completed_at
 	`,
-		t.ID, t.Title, t.List, t.Notes, t.Status, due, t.Priority, t.Recurrence,
+		t.ID, t.Title, t.List, t.Notes, t.URL, t.Status, due, t.Priority, t.Recurrence,
 		t.ExternalID, t.Source,
 		t.CreatedAt.UTC().Format(time.RFC3339),
 		t.UpdatedAt.UTC().Format(time.RFC3339),
@@ -106,7 +108,7 @@ type ListFilter struct {
 }
 
 func (s *Store) ListTasks(ctx context.Context, f ListFilter) ([]models.Task, error) {
-	query := `SELECT id,title,list,notes,status,due_date,priority,recurrence,external_id,source,created_at,updated_at,completed_at FROM tasks WHERE 1=1`
+	query := `SELECT id,title,list,notes,url,status,due_date,priority,recurrence,external_id,source,created_at,updated_at,completed_at FROM tasks WHERE 1=1`
 	var args []any
 	if f.List != "" {
 		query += ` AND list = ?`
@@ -370,7 +372,7 @@ func scanTasks(rows *sql.Rows) ([]models.Task, error) {
 		var due, completedAt sql.NullString
 		var createdStr, updatedStr string
 		if err := rows.Scan(
-			&t.ID, &t.Title, &t.List, &t.Notes, &t.Status, &due, &t.Priority, &t.Recurrence,
+			&t.ID, &t.Title, &t.List, &t.Notes, &t.URL, &t.Status, &due, &t.Priority, &t.Recurrence,
 			&t.ExternalID, &t.Source, &createdStr, &updatedStr, &completedAt,
 		); err != nil {
 			return nil, err
