@@ -394,6 +394,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if t != nil && t.URL != "" {
 				return m, openURLCmd(t.URL)
 			}
+		case "p":
+			if t != nil {
+				m.pomTask = t
+				m.pomStart = time.Now()
+				m.pomRunning = true
+				m.view = viewPomodoro
+				m.detailTarget = nil
+				return m, tick()
+			}
 		case "e":
 			if t != nil {
 				m.listEntries = uniqueListEntries(m.tasks)
@@ -699,7 +708,7 @@ func (m Model) View() string {
 	case viewCreate:
 		return m.renderForm()
 	case viewPomodoro:
-		return m.renderPomodoro()
+		return overlay.Center(m.renderList(), m.renderPomodoro(), m.width, m.height, 0)
 	case viewStats:
 		return m.renderStats()
 	case viewHelp:
@@ -1018,7 +1027,7 @@ func (m Model) renderDetailPopup() string {
 		b.WriteString("\n" + label("Notes") + "\n" + t.Notes + "\n")
 	}
 
-	footer := "e edit  d delete"
+	footer := "e edit  d delete  p pomodoro"
 	if t.URL != "" {
 		footer = "o open url  " + footer
 	}
@@ -1163,17 +1172,21 @@ func (m Model) renderPomodoro() string {
 	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
 
 	var b strings.Builder
-	b.WriteString("\n" + m.renderHeader("Pomodoro") + "\n\n")
-	b.WriteString("  " + styleHeader.Render(title) + "\n\n")
-	b.WriteString("  " + stylePomo.Render(timerStr) + "\n\n")
-	b.WriteString("  " + styleSubhead.Render(bar) + "\n\n")
+	b.WriteString(styleHeader.Render(title) + "\n\n")
+	b.WriteString(stylePomo.Render(timerStr) + "\n\n")
+	b.WriteString(styleSubhead.Render(bar) + "\n\n")
 	if done {
-		b.WriteString("  " + styleHeader.Render("Time's up! Take a break.") + "\n\n")
+		b.WriteString(styleHeader.Render("Time's up! Take a break.") + "\n\n")
 	} else {
-		b.WriteString("  " + styleSubhead.Render(fmt.Sprintf("%d min focus session", int(pomodoroDuration.Minutes()))) + "\n\n")
+		b.WriteString(styleSubhead.Render(fmt.Sprintf("%d min focus session", int(pomodoroDuration.Minutes()))) + "\n\n")
 	}
-	b.WriteString("  " + styleKey.Render("esc") + " / " + styleKey.Render("q") + "  cancel\n")
-	return b.String()
+	b.WriteString(styleKey.Render("esc") + " / " + styleKey.Render("q") + styleSubhead.Render("  cancel"))
+
+	popW := min(56, m.width)
+	if popW < 40 {
+		popW = 40
+	}
+	return stylePopupBorder.Width(popW).Render(b.String())
 }
 
 func (m Model) renderStats() string {
