@@ -34,6 +34,7 @@ const (
 	viewPomodoro view = 2
 	viewStats    view = 3
 	viewHelp     view = 4
+	viewDetail   view = 5
 )
 
 // ── Form fields ───────────────────────────────────────────────────────────────
@@ -145,6 +146,8 @@ type Model struct {
 	listPickerIdx int
 	// delete confirm
 	deleteTarget *models.Task
+	// detail popup (enter)
+	detailTarget *models.Task
 	// undo
 	lastDeleted *models.Task
 	// focus mode (today + overdue only)
@@ -375,6 +378,41 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.helpVP, cmd = m.helpVP.Update(msg)
 		return m, cmd
+	}
+
+	// ── task detail popup ────────────────────────────────────────────────
+	if m.view == viewDetail {
+		t := m.detailTarget
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "q", "esc", "enter":
+			m.view = viewList
+			m.detailTarget = nil
+			return m, nil
+		case "o":
+			if t != nil && t.URL != "" {
+				return m, openURLCmd(t.URL)
+			}
+		case "e":
+			if t != nil {
+				m.listEntries = uniqueListEntries(m.tasks)
+				m.view = viewCreate
+				m.inputs = prefillForm(t)
+				m.editTarget = t
+				m.inputIdx = 0
+				m.listPickerIdx = 0
+				m.detailTarget = nil
+				return m, tea.Batch(m.inputs[fTitle].Focus(), loadAllListNamesCmd())
+			}
+		case "d":
+			if t != nil {
+				m.deleteTarget = t
+				m.view = viewList
+				m.detailTarget = nil
+			}
+		}
+		return m, nil
 	}
 
 	// ── create/edit form ──────────────────────────────────────────────────
@@ -613,6 +651,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.view = viewStats
 		return m, loadStats()
 
+	case "enter":
+		if t := cursorTask(m); t != nil {
+			m.detailTarget = t
+			m.view = viewDetail
+		}
+		return m, nil
+
 	case "n":
 		m.listEntries = uniqueListEntries(m.tasks)
 		m.view = viewCreate
@@ -662,6 +707,8 @@ func (m Model) View() string {
 		// the correct background to keep visible behind the popup. No
 		// enclosing border on the list view, so inset 0 is safe.
 		return overlay.Center(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
+	case viewDetail:
+		return overlay.Center(m.renderList(), m.renderDetailPopup(), m.width, m.height, 0)
 	default:
 		return m.renderList()
 	}
@@ -701,6 +748,8 @@ func (m Model) renderList() string {
 		switch {
 		case m.searchQuery() != "":
 			b.WriteString("  No tasks match your search.\n")
+		case m.focusMode:
+			b.WriteString("  No tasks due today or overdue — press t to show all tasks.\n")
 		case len(m.tasks) == 0:
 			b.WriteString("  No tasks yet — press n to add one, or s to sync with Apple Reminders.\n")
 		default:
@@ -708,7 +757,7 @@ func (m Model) renderList() string {
 		}
 	}
 	query := m.searchQuery()
-	listHeight := m.height - 6
+	listHeight := m.height - 5 - statusBarHeight
 	if m.searching {
 		listHeight -= 2
 	}
@@ -837,7 +886,7 @@ func (m Model) visibleRowsWithStart(height int) ([]row, int) {
 // it visually appears to be over even once the list has scrolled.
 func (m Model) rowHitTest(y int) int {
 	row := 3
-	listHeight := m.height - 6
+	listHeight := m.height - 5 - statusBarHeight
 	if m.searching {
 		row += 2
 		listHeight -= 2
@@ -877,6 +926,7 @@ func (m Model) helpContent() string {
 	b.WriteString(row("c", "show / hide completed tasks"))
 	b.WriteString(section("Tasks"))
 	b.WriteString(row("space", "toggle done"))
+	b.WriteString(row("enter", "task details"))
 	b.WriteString(row("n", "new task"))
 	b.WriteString(row("e", "edit task"))
 	b.WriteString(row("d", "delete task (asks to confirm)"))
@@ -931,6 +981,57 @@ func (m Model) renderHelpPopup() string {
 	return stylePopupBorder.Width(m.helpPopW).Render(body)
 }
 
+// renderDetailPopup shows every field of the task under the cursor — the
+// compact list row only has room for title/due/recurrence/link, so this is
+// the one place notes and the full URL are actually readable.
+func (m Model) renderDetailPopup() string {
+	t := m.detailTarget
+	if t == nil {
+		return ""
+	}
+	label := func(s string) string { return styleSubhead.Render(fmt.Sprintf("%-10s", s)) }
+
+	var b strings.Builder
+	b.WriteString(styleHeader.Render(t.Title) + "\n\n")
+	b.WriteString(label("List") + t.List + "\n")
+	status := "open"
+	if t.Done() {
+		status = "done"
+	}
+	b.WriteString(label("Status") + status + "\n")
+	if t.DueDate != nil {
+		b.WriteString(label("Due") + t.DueDate.Format("Mon, Jan 02 2006 15:04") + "\n")
+	}
+	if t.Recurrence != "" {
+		b.WriteString(label("Repeat") + t.Recurrence + "\n")
+	}
+	switch t.Priority {
+	case 1:
+		b.WriteString(label("Priority") + "high\n")
+	case 5:
+		b.WriteString(label("Priority") + "medium\n")
+	}
+	if t.URL != "" {
+		b.WriteString(label("URL") + styleDue.Render(t.URL) + "\n")
+	}
+	if t.Notes != "" {
+		b.WriteString("\n" + label("Notes") + "\n" + t.Notes + "\n")
+	}
+
+	footer := "e edit  d delete"
+	if t.URL != "" {
+		footer = "o open url  " + footer
+	}
+	footer += "  esc/enter close"
+	b.WriteString("\n" + styleSubhead.Render(footer))
+
+	popW := min(70, m.width)
+	if popW < 40 {
+		popW = 40
+	}
+	return stylePopupBorder.Width(popW).Render(b.String())
+}
+
 func (m Model) renderStatusBar() string {
 	key := func(k string) string { return styleKey.Render(k) }
 
@@ -942,14 +1043,19 @@ func (m Model) renderStatusBar() string {
 	if m.showDone {
 		doneLabel = "hide done"
 	}
-	return fmt.Sprintf(
-		"  %s/%s nav  %s done  %s postpone  %s undo  %s pomo  %s/%s/%s tasks  %s select  %s focus  %s search  %s stats  %s sync  %s %s  %s help  %s quit\n",
+	line1 := fmt.Sprintf(
+		"  %s/%s nav  %s done  %s details  %s/%s/%s new/edit/delete  %s open url  %s postpone",
 		key("↑"), key("↓"),
 		key("space"),
+		key("enter"),
+		key("n"), key("e"), key("d"),
+		key("o"),
 		key("S"),
+	)
+	line2 := fmt.Sprintf(
+		"  %s undo  %s pomo  %s select  %s focus  %s search  %s stats  %s sync  %s %s  %s help  %s quit",
 		key("u"),
 		key("p"),
-		key("n"), key("e"), key("d"),
 		key("v"),
 		key("t"),
 		key("/"),
@@ -959,7 +1065,10 @@ func (m Model) renderStatusBar() string {
 		key("?"),
 		key("q"),
 	)
+	return line1 + "\n" + line2 + "\n"
 }
+
+const statusBarHeight = 2
 
 func (m Model) renderForm() string {
 	heading := "New Task"
@@ -1195,6 +1304,13 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 		}
 		title, priority := parsePriority(rawTitle)
 		listName := strings.TrimSpace(inputs[fList].Value())
+		if listName == "" {
+			// Resolve to the same list CreateTask would fall back to, so the
+			// local echo and the Apple-side reminder always agree — otherwise
+			// the local row stays "" forever while Apple creates it under its
+			// real default list, leaving a permanent phantom duplicate.
+			listName = reminders.DefaultList()
+		}
 		dueStr := strings.TrimSpace(inputs[fDue].Value())
 		notes := strings.TrimSpace(inputs[fNotes].Value())
 		url := strings.TrimSpace(inputs[fURL].Value())

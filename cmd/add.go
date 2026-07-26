@@ -31,6 +31,11 @@ var addCmd = &cobra.Command{
 		if list == "" {
 			list = config.Active.DefaultList
 		}
+		if list == "" {
+			// Same list CreateTask falls back to — resolve it here too so
+			// the local cache entry matches what Apple actually creates.
+			list = reminders.DefaultList()
+		}
 		t := &models.Task{
 			ID:        "taskctl-" + uuid.New().String(),
 			Title:     args[0],

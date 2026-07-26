@@ -163,7 +163,7 @@ end tell`
 func CreateTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
-		listName = defaultList()
+		listName = DefaultList()
 	}
 	dueLine := ""
 	if t.DueDate != nil {
@@ -200,7 +200,7 @@ end tell
 func CompleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
-		listName = defaultList()
+		listName = DefaultList()
 	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
@@ -224,7 +224,7 @@ end tell
 func UncompleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
-		listName = defaultList()
+		listName = DefaultList()
 	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
@@ -248,7 +248,7 @@ end tell
 func PostponeTask(t *models.Task, newDue time.Time) error {
 	listName := t.List
 	if listName == "" {
-		listName = defaultList()
+		listName = DefaultList()
 	}
 	iso := newDue.Format("2006-01-02T15:04:05")
 	script := fmt.Sprintf(`
@@ -274,7 +274,7 @@ end tell
 func DeleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
-		listName = defaultList()
+		listName = DefaultList()
 	}
 	script := fmt.Sprintf(`
 tell application "Reminders"
@@ -411,7 +411,7 @@ func parseTasks(raw string) []models.Task {
 	return tasks
 }
 
-func defaultList() string {
+func DefaultList() string {
 	script := `tell application "Reminders" to return name of default list`
 	out, err := runAppleScript(script)
 	if err != nil || strings.TrimSpace(out) == "" {

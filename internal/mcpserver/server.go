@@ -208,6 +208,11 @@ func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	if listName == "" {
 		listName = config.Active.DefaultList
 	}
+	if listName == "" {
+		// Same list CreateTask falls back to — resolve it here too so the
+		// local cache entry matches what Apple actually creates.
+		listName = reminders.DefaultList()
+	}
 
 	t := &models.Task{
 		ID:        "taskctl-" + uuid.New().String(),

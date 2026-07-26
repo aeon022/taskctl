@@ -349,6 +349,13 @@ func (s *Store) PrunePendingDeletes(ctx context.Context) error {
 // CreateTask goroutine succeeded and the sync confirmed it.
 // We compare created_at so a pre-existing apple task (older than our local one)
 // does NOT cause the new local task to be deleted.
+//
+// Matches by title only, NOT list: the local row is just an optimistic echo
+// of "this will show up in Apple soon", and it can land in a different list
+// than the one it was created with (empty-list default-list resolution,
+// a CreateTask failure the user then redid by hand in Reminders.app, etc).
+// Once any apple-sourced task with the same title exists, the echo has
+// served its purpose — keeping it around only produces a phantom duplicate.
 func (s *Store) RemoveShadowedLocal(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM tasks
@@ -357,7 +364,7 @@ func (s *Store) RemoveShadowedLocal(ctx context.Context) error {
 		      SELECT tc.id
 		      FROM tasks tc
 		      JOIN tasks ap
-		        ON tc.title = ap.title AND tc.list = ap.list
+		        ON tc.title = ap.title
 		       AND ap.source = 'apple'
 		       AND ap.created_at >= tc.created_at
 		  )
