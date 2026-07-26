@@ -793,37 +793,6 @@ func (m Model) renderDivider() string {
 
 // groupCounts tallies how many task rows fall under each list-section
 // header in m.rows, for the "(n)" badge next to each list name.
-// todaySummary is an at-a-glance "N due today · N overdue" for the header
-// area, computed across all tasks regardless of the current filter/focus
-// mode. Empty when there's nothing due or overdue, so a clean day stays
-// clean rather than showing "0 due today".
-func (m Model) todaySummary() string {
-	now := time.Now()
-	var dueToday, overdue int
-	for _, t := range m.tasks {
-		if t.Done() || t.DueDate == nil {
-			continue
-		}
-		switch {
-		case t.DueDate.Before(startOfDay(now)):
-			overdue++
-		case !t.DueDate.After(endOfDay(now)):
-			dueToday++
-		}
-	}
-	if dueToday == 0 && overdue == 0 {
-		return ""
-	}
-	var parts []string
-	if dueToday > 0 {
-		parts = append(parts, styleToday.Render(fmt.Sprintf("%d due today", dueToday)))
-	}
-	if overdue > 0 {
-		parts = append(parts, styleOverdue.Render(fmt.Sprintf("%d overdue", overdue)))
-	}
-	return strings.Join(parts, styleSubhead.Render(" · "))
-}
-
 func (m Model) groupCounts() map[string]int {
 	counts := make(map[string]int)
 	label := ""
@@ -843,11 +812,8 @@ func (m Model) renderList() string {
 	b.WriteString(m.renderDivider() + "\n")
 
 	extra := ""
-	if s := m.todaySummary(); s != "" {
-		extra = "  " + s
-	}
 	if m.syncing {
-		extra += "  " + m.sp.View() + styleSubhead.Render(" syncing…")
+		extra = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
 	}
 	if m.focusMode {
 		extra += "  " + styleFocusBadge.Render("focus: today & overdue")
