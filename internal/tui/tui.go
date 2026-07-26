@@ -69,7 +69,10 @@ type statsMsg struct {
 	today, week, total int
 	daily              []int
 }
-type listNamesMsg struct{ entries []models.ListEntry }
+type listNamesMsg struct {
+	entries []models.ListEntry
+	err     error
+}
 type batchDoneMsg struct{ err error }
 type batchDeletedMsg struct {
 	count int
@@ -275,6 +278,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m.listEntries[i].Account < m.listEntries[j].Account
 			})
+		} else if msg.err != nil && len(m.listEntries) == 0 {
+			// Only surface this when the picker would otherwise stay silently
+			// empty (e.g. a fresh install with no cached tasks, so
+			// uniqueListEntries(m.tasks) also had nothing to fall back on) —
+			// don't clobber the form with an error if we already have entries
+			// from the task cache.
+			m.err = fmt.Errorf("couldn't load Reminders lists: %v", msg.err)
 		}
 
 	case statsMsg:
@@ -1570,21 +1580,21 @@ func loadCachedListEntriesCmd() tea.Cmd {
 		}
 		defer s.Close()
 		entries, _ := s.GetListEntries(context.Background())
-		return listNamesMsg{entries}
+		return listNamesMsg{entries: entries}
 	}
 }
 
 func loadAllListNamesCmd() tea.Cmd {
 	return func() tea.Msg {
-		entries, _ := reminders.ListListsWithAccounts()
+		entries, err := reminders.ListListsWithAccounts()
 		// persist to SQLite cache so next startup is instant
 		if len(entries) > 0 {
-			if s, err := store.New(config.DBPath()); err == nil {
+			if s, dbErr := store.New(config.DBPath()); dbErr == nil {
 				_ = s.StoreListEntries(context.Background(), entries, "apple")
 				s.Close()
 			}
 		}
-		return listNamesMsg{entries}
+		return listNamesMsg{entries: entries, err: err}
 	}
 }
 
