@@ -62,6 +62,11 @@ const (
 
 var formLabels = [fCount]string{"Title", "List", "Due", "Notes", "URL", "Repeat (daily/weekly/monthly)"}
 
+// formLabelWidth is styleLabel's fixed width; the list-picker rows below
+// the List field indent past it (+2 for the "  " separator) to line up
+// under the field's value column instead of its label.
+const formLabelWidth = 28
+
 const pomodoroDuration = 25 * time.Minute
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -119,19 +124,19 @@ var (
 			Background(theme.SelectedBg).
 			Foreground(theme.SelectedFg).
 			Bold(true)
-	styleKey        = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
-	styleLabel      = lipgloss.NewStyle().Foreground(colorMuted).Width(28)
-	styleBox        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
-	styleErr        = lipgloss.NewStyle().Foreground(colorRed)
-	styleRecur      = lipgloss.NewStyle().Foreground(colorGreen)
-	stylePomo       = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
-	styleStats      = lipgloss.NewStyle().Foreground(colorBlue)
-	styleUrgent     = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
-	styleImportant  = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	styleSelected   = lipgloss.NewStyle().Foreground(colorGreen)
-	styleFocusBadge = lipgloss.NewStyle().Background(colorRed).Foreground(theme.SelectedFg).Padding(0, 1)
-	styleCountBadge = lipgloss.NewStyle().Foreground(colorMuted).Background(theme.HoverBg).Padding(0, 1)
-	styleTitleBar   = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectedFg).Background(colorBlue)
+	styleKey         = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+	styleLabel       = lipgloss.NewStyle().Foreground(colorMuted).Width(formLabelWidth)
+	stylePopupBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
+	styleErr         = lipgloss.NewStyle().Foreground(colorRed)
+	styleRecur       = lipgloss.NewStyle().Foreground(colorGreen)
+	stylePomo        = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
+	styleStats       = lipgloss.NewStyle().Foreground(colorBlue)
+	styleUrgent      = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+	styleImportant   = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+	styleSelected    = lipgloss.NewStyle().Foreground(colorGreen)
+	styleFocusBadge  = lipgloss.NewStyle().Background(colorRed).Foreground(theme.SelectedFg).Padding(0, 1)
+	styleCountBadge  = lipgloss.NewStyle().Foreground(colorMuted).Background(theme.HoverBg).Padding(0, 1)
+	styleTitleBar    = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectedFg).Background(colorBlue)
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -1136,8 +1141,6 @@ func (m Model) openHelp() Model {
 	return m
 }
 
-var stylePopupBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBlue).Padding(1, 2)
-
 // renderHelpPopup renders the help viewport in a bordered box, meant to be
 // composited over the list view via overlay.Center rather than replacing
 // the whole screen — the list stays visible around it.
@@ -1283,7 +1286,6 @@ func (m Model) renderForm() string {
 		heading = "Edit Task"
 	}
 	var inner strings.Builder
-	inner.WriteString(styleHeader.Render(heading) + "\n\n")
 	for i, inp := range m.inputs {
 		inner.WriteString(styleLabel.Render(formLabels[i]) + "  " + inp.View() + "\n")
 		// show list picker below the List field when focused
@@ -1308,14 +1310,14 @@ func (m Model) renderForm() string {
 					label += styleSubhead.Render(" (" + e.Account + ")")
 				}
 				if j == m.listPickerIdx {
-					inner.WriteString(strings.Repeat(" ", 30) + styleKey.Render("▶ ") + styleKey.Render(e.Name) + styleSubhead.Render(func() string {
+					inner.WriteString(strings.Repeat(" ", formLabelWidth+2) + styleKey.Render("▶ ") + styleKey.Render(e.Name) + styleSubhead.Render(func() string {
 						if e.Account != "" {
 							return " (" + e.Account + ")"
 						}
 						return ""
 					}()) + "\n")
 				} else {
-					inner.WriteString(strings.Repeat(" ", 30) + styleSubhead.Render("  "+label) + "\n")
+					inner.WriteString(strings.Repeat(" ", formLabelWidth+2) + styleSubhead.Render("  "+label) + "\n")
 				}
 			}
 		}
@@ -1328,9 +1330,18 @@ func (m Model) renderForm() string {
 	}
 
 	key := func(k string) string { return styleKey.Render(k) }
+	bodyLines := strings.Split(inner.String(), "\n")
+	innerW := 0
+	for _, l := range bodyLines {
+		if w := lipgloss.Width(l); w > innerW {
+			innerW = w
+		}
+	}
+	titleBar := styleTitleBar.Width(innerW).Render(" " + heading)
+
 	var b strings.Builder
 	b.WriteString(m.renderHeader(heading) + "\n" + m.renderDivider() + "\n\n")
-	b.WriteString(styleBox.Render(inner.String()))
+	b.WriteString(stylePopupBorder.Render(titleBar + "\n\n" + inner.String()))
 	b.WriteString("\n\n")
 	b.WriteString(fmt.Sprintf("  %s next  %s next/save  %s save  %s cancel\n",
 		key("tab"), key("enter"), key("ctrl+s"), key("esc")))
@@ -1369,8 +1380,14 @@ func (m Model) renderPomodoro() string {
 	}
 	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
 
+	popW := min(56, m.width)
+	if popW < 40 {
+		popW = 40
+	}
+	titleBar := styleTitleBar.Width(max(0, popW-6)).Render(" " + title)
+
 	var b strings.Builder
-	b.WriteString(styleHeader.Render(title) + "\n\n")
+	b.WriteString(titleBar + "\n\n")
 	b.WriteString(stylePomo.Render(timerStr) + "\n\n")
 	b.WriteString(styleSubhead.Render(bar) + "\n\n")
 	if done {
@@ -1380,10 +1397,6 @@ func (m Model) renderPomodoro() string {
 	}
 	b.WriteString(styleKey.Render("esc") + " / " + styleKey.Render("q") + styleSubhead.Render("  cancel"))
 
-	popW := min(56, m.width)
-	if popW < 40 {
-		popW = 40
-	}
 	return stylePopupBorder.Width(popW).Render(b.String())
 }
 
@@ -1398,9 +1411,9 @@ func (m Model) renderStats() string {
 	}
 
 	st := m.statsData
-	b.WriteString(fmt.Sprintf("  %-14s %s\n", "Today", styleStats.Render(fmt.Sprintf("%d ✓", st.today))))
-	b.WriteString(fmt.Sprintf("  %-14s %s\n", "This week", styleStats.Render(fmt.Sprintf("%d ✓", st.week))))
-	b.WriteString(fmt.Sprintf("  %-14s %s\n", "Total", styleStats.Render(fmt.Sprintf("%d ✓", st.total))))
+	b.WriteString(fmt.Sprintf("  %-14s %s\n", "Today", styleCountBadge.Render(fmt.Sprintf("%d ✓", st.today))))
+	b.WriteString(fmt.Sprintf("  %-14s %s\n", "This week", styleCountBadge.Render(fmt.Sprintf("%d ✓", st.week))))
+	b.WriteString(fmt.Sprintf("  %-14s %s\n", "Total", styleCountBadge.Render(fmt.Sprintf("%d ✓", st.total))))
 
 	if len(st.daily) > 0 {
 		b.WriteString("\n  " + styleSubhead.Render("Last 10 days") + "\n")
