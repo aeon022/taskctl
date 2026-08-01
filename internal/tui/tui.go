@@ -155,6 +155,12 @@ type Model struct {
 	rows     []row
 	cursor   int
 	hoverRow int // m.rows index under the mouse cursor, -1 when none
+
+	// openTaskID, when set (via `taskctl --task <id>`, e.g. jumping in from
+	// timectl's linked-entry), pre-selects and opens that task's detail
+	// popup as soon as tasks finish loading, then clears itself so it only
+	// fires once — a normal "u" undo etc. afterward must not keep re-firing it.
+	openTaskID string
 	// double-click detection: a second left-click on the same row within
 	// doubleClickWindow opens the detail popup instead of just selecting.
 	lastClickRow int
@@ -203,7 +209,7 @@ type Model struct {
 	helpPopH int
 }
 
-func newModel() Model {
+func newModel(openTaskID string) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
 	sp.Style = styleSubhead
@@ -211,7 +217,7 @@ func newModel() Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 80
-	return Model{loading: true, searchInput: si, sp: sp, hoverRow: -1, lastClickRow: -1}
+	return Model{loading: true, searchInput: si, sp: sp, hoverRow: -1, lastClickRow: -1, openTaskID: openTaskID}
 }
 
 // ── Init / Update / View ──────────────────────────────────────────────────────
@@ -235,6 +241,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// pre-populate list entries from loaded tasks so picker works immediately
 		if len(m.listEntries) == 0 {
 			m.listEntries = uniqueListEntries(m.tasks)
+		}
+		if m.openTaskID != "" {
+			for i, r := range m.rows {
+				if !r.isHeader && r.task != nil && r.task.ID == m.openTaskID {
+					m.cursor = i
+					m.detailTarget = r.task
+					m.view = viewDetail
+					break
+				}
+			}
+			m.openTaskID = ""
 		}
 
 	case syncDoneMsg:
@@ -2117,9 +2134,11 @@ func endOfDay(t time.Time) time.Time {
 	return time.Date(y, mo, d, 23, 59, 59, 0, t.Location())
 }
 
-// Run starts the TUI.
-func Run() error {
-	p := tea.NewProgram(newModel(), tea.WithAltScreen(), tea.WithMouseAllMotion())
+// Run starts the TUI. openTaskID, if non-empty, pre-selects and opens that
+// task's detail popup as soon as tasks finish loading — used by `taskctl
+// --task <id>` to jump in directly from another tool's linked entry.
+func Run(openTaskID string) error {
+	p := tea.NewProgram(newModel(openTaskID), tea.WithAltScreen(), tea.WithMouseAllMotion())
 	_, err := p.Run()
 	return err
 }

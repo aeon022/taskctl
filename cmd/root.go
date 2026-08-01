@@ -11,13 +11,14 @@ import (
 )
 
 var flagJSON bool
+var flagOpenTask string
 
 var rootCmd = &cobra.Command{
 	Use:   "taskctl",
 	Short: "Manage Apple Reminders from your terminal",
 	Long:  "taskctl — local-first task manager. Syncs with Apple Reminders via EventKit.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return tui.Run()
+		return tui.Run(flagOpenTask)
 	},
 }
 
@@ -32,6 +33,7 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON")
+	rootCmd.Flags().StringVar(&flagOpenTask, "task", "", "Open directly on this task's detail view (by id) — for jumping in from another tool's linked entry")
 }
 
 func isJSON() bool { return flagJSON }
