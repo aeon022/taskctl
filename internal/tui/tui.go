@@ -12,6 +12,7 @@ import (
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
+	"github.com/aeon022/missionctl-core/uistate"
 	"github.com/aeon022/taskctl/internal/config"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/nlpdate"
@@ -220,7 +221,29 @@ func newModel(openTaskID string) Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 80
-	return Model{loading: true, searchInput: si, sp: sp, hoverRow: -1, lastClickRow: -1, openTaskID: openTaskID}
+
+	var state persistedState
+	uistate.Load(config.UIStatePath(), &state)
+
+	return Model{
+		loading:      true,
+		searchInput:  si,
+		sp:           sp,
+		hoverRow:     -1,
+		lastClickRow: -1,
+		openTaskID:   openTaskID,
+		filter:       listFilterMode(state.Filter),
+	}
+}
+
+// persistedState is what newModel restores from and saveUIState saves to —
+// see missionctl-core/uistate.
+type persistedState struct {
+	Filter int `json:"filter"` // listFilterMode value
+}
+
+func (m Model) saveUIState() {
+	_ = uistate.Save(config.UIStatePath(), persistedState{Filter: int(m.filter)})
 }
 
 // ── Init / Update / View ──────────────────────────────────────────────────────
@@ -731,6 +754,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		} else {
 			m.filter = filterFocus
 		}
+		m.saveUIState()
 		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 		m.cursor = firstTaskRow(m.rows)
 		return m, nil
@@ -741,6 +765,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		} else {
 			m.filter = filterOverdue
 		}
+		m.saveUIState()
 		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 		m.cursor = firstTaskRow(m.rows)
 		return m, nil

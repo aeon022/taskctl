@@ -50,6 +50,15 @@ func DBPath() string {
 	return filepath.Join(dir, "taskctl.db")
 }
 
+// UIStatePath is where the TUI persists small preferences (last active
+// filter mode) — see missionctl-core/uistate.
+func UIStatePath() string {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, "Library", "Application Support", "taskctl")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "ui_state.json")
+}
+
 // LastSyncedPath is the marker file (see missionctl-core/lastsync) tracking
 // when a sync last completed, for the TUI's "synced Xh ago" indicator.
 func LastSyncedPath() string {
