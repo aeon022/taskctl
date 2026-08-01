@@ -1276,40 +1276,44 @@ func (m Model) narrowFooter() bool { return m.width > 0 && m.width < 90 }
 
 func (m Model) renderStatusBar() string {
 	key := func(k string) string { return styleKey.Render(k) }
+	// keyed renders a (possibly multi-key, e.g. "↑/↓") hint in the
+	// suite-wide "key:label" format — only the key glyphs are styled, the
+	// colon is plain like every other tool's footer.
+	keyed := func(k string) string { return styleKey.Render(k) + ":" }
 
 	if m.deleteTarget != nil {
-		return fmt.Sprintf("  Delete %q?  %s confirm  any cancel\n",
-			m.deleteTarget.Title, key("y"))
+		return fmt.Sprintf("  Delete %q?  %sconfirm  any cancel\n",
+			m.deleteTarget.Title, keyed("y"))
 	}
 	if m.narrowFooter() {
-		return fmt.Sprintf("  %s/%s nav  %s done  %s new  %s search  %s help  %s quit\n",
-			key("↑"), key("↓"), key("space"), key("n"), key("/"), key("?"), key("q"))
+		return fmt.Sprintf("  %snav  %sdone  %snew  %ssearch  %shelp  %squit\n",
+			keyed("↑/↓"), keyed("space"), keyed("n"), keyed("/"), keyed("?"), keyed("q"))
 	}
 	doneLabel := "show done"
 	if m.showDone {
 		doneLabel = "hide done"
 	}
 	line1 := fmt.Sprintf(
-		"  %s/%s nav  %s done  %s details  %s/%s/%s new/edit/delete  %s open url  %s postpone",
-		key("↑"), key("↓"),
-		key("space"),
-		key("enter"),
-		key("n"), key("e"), key("d"),
-		key("o"),
-		key("S"),
+		"  %snav  %sdone  %sdetails  %snew/edit/delete  %sopen url  %spostpone",
+		keyed("↑/↓"),
+		keyed("space"),
+		keyed("enter"),
+		keyed("n/e/d"),
+		keyed("o"),
+		keyed("S"),
 	)
 	line2 := fmt.Sprintf(
-		"  %s undo  %s pomo  %s select  %s focus  %s search  %s stats  %s sync  %s %s  %s help  %s quit",
-		key("u"),
-		key("p"),
-		key("v"),
-		key("t"),
-		key("/"),
-		key("i"),
-		key("s"),
-		key("c"), doneLabel,
-		key("?"),
-		key("q"),
+		"  %sundo  %spomo  %sselect  %sfocus  %ssearch  %sstats  %ssync  %s%s  %shelp  %squit",
+		keyed("u"),
+		keyed("p"),
+		keyed("v"),
+		keyed("t"),
+		keyed("/"),
+		keyed("i"),
+		keyed("s"),
+		key("c"), ":"+doneLabel,
+		keyed("?"),
+		keyed("q"),
 	)
 	return line1 + "\n" + line2 + "\n"
 }
