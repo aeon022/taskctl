@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aeon022/missionctl-core/humanize"
+	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/taskctl/internal/config"
@@ -168,6 +170,7 @@ type Model struct {
 	view         view
 	loading      bool
 	syncing      bool
+	lastSynced   time.Time // zero = never synced this install
 	sp           spinner.Model
 	showDone     bool
 	err          error
@@ -223,7 +226,16 @@ func newModel(openTaskID string) Model {
 // ── Init / Update / View ──────────────────────────────────────────────────────
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadTasks(m.showDone), loadCachedListEntriesCmd(), loadAllListNamesCmd(), m.sp.Tick)
+	return tea.Batch(loadTasks(m.showDone), loadCachedListEntriesCmd(), loadAllListNamesCmd(), m.sp.Tick, loadLastSyncedCmd())
+}
+
+type lastSyncedLoadedMsg struct{ t time.Time }
+
+func loadLastSyncedCmd() tea.Cmd {
+	return func() tea.Msg {
+		t, _ := lastsync.Load(config.LastSyncedPath())
+		return lastSyncedLoadedMsg{t: t}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -254,6 +266,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openTaskID = ""
 		}
 
+	case lastSyncedLoadedMsg:
+		m.lastSynced = msg.t
+
 	case syncDoneMsg:
 		m.syncing = false
 		if msg.err != nil {
@@ -263,6 +278,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 			m.cursor = firstTaskRow(m.rows)
 			m.err = nil
+			m.lastSynced = time.Now()
+			_ = lastsync.Save(config.LastSyncedPath(), m.lastSynced)
 		}
 
 	case taskSavedMsg:
@@ -913,6 +930,8 @@ func (m Model) renderList() string {
 	extra := ""
 	if m.syncing {
 		extra = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
+	} else if !m.lastSynced.IsZero() {
+		extra = "  " + styleSubhead.Render("synced "+humanize.TimeAgo(m.lastSynced))
 	}
 	switch m.filter {
 	case filterFocus:
