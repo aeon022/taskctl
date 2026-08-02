@@ -88,7 +88,7 @@ func toolDeleteTask() mcp.Tool {
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 func handleToday(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -111,7 +111,7 @@ func handleToday(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult,
 }
 
 func handleWeekTasks(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -154,7 +154,7 @@ func handleListTasks(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
 		statusArg = ""
 	}
 
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -174,7 +174,7 @@ func handleSync(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -234,7 +234,7 @@ func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	}
 
 	ctx := context.Background()
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err == nil {
 		defer s.Close()
 		_ = s.ClearPendingDelete(ctx, t.Title, t.List)
@@ -262,7 +262,7 @@ func handleCompleteTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 
 	// write SQLite first, then call AppleScript
 	ctx := context.Background()
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err == nil {
 		defer s.Close()
 		tasks, _ := s.ListTasks(ctx, store.ListFilter{List: listName, Status: "needsAction"})
@@ -299,7 +299,7 @@ func handleDeleteTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 
 	// write SQLite first, then call AppleScript
 	ctx := context.Background()
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err == nil {
 		defer s.Close()
 		tasks, _ := s.ListTasks(ctx, store.ListFilter{List: listName})

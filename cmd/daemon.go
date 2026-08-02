@@ -104,7 +104,7 @@ func syncOnce(ctx context.Context) {
 		return
 	}
 
-	s, err := store.New(config.DBPath())
+	s, err := store.New(config.DBPath(), config.Shared())
 	if err != nil {
 		return
 	}

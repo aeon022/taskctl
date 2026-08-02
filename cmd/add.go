@@ -56,7 +56,7 @@ var addCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err == nil {
 			defer s.Close()
 			_ = s.ClearPendingDelete(ctx, t.Title, t.List)

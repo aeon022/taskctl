@@ -14,7 +14,7 @@ var weekCmd = &cobra.Command{
 	Use:   "week",
 	Short: "Show tasks due this week (Mon–Sun)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return err
 		}

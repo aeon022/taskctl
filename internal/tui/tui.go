@@ -1687,7 +1687,7 @@ func clearFlashCmd(text string) tea.Cmd {
 
 func loadTasks(showDone bool) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return tasksLoadedMsg{}
 		}
@@ -1706,7 +1706,7 @@ func loadTasks(showDone bool) tea.Cmd {
 
 func loadStats() tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return statsMsg{}
 		}
@@ -1728,7 +1728,7 @@ func syncCmd() tea.Cmd {
 			return syncDoneMsg{err: err}
 		}
 
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return syncDoneMsg{err: err}
 		}
@@ -1796,7 +1796,7 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 			t.DueDate = d
 		}
 
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return taskSavedMsg{err}
 		}
@@ -1879,7 +1879,7 @@ func deleteTaskCmd(t *models.Task) tea.Cmd {
 	taskCopy := *t
 	return func() tea.Msg {
 		ctx := context.Background()
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err == nil {
 			defer s.Close()
 			_ = s.DeleteByID(ctx, taskCopy.ID)
@@ -1896,7 +1896,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 	taskCopy := *t
 	return func() tea.Msg {
 		ctx := context.Background()
-		s, sErr := store.New(config.DBPath())
+		s, sErr := store.New(config.DBPath(), config.Shared())
 		if sErr != nil {
 			return taskSavedMsg{}
 		}
@@ -1910,7 +1910,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 		go func() {
 			providerToggle(&taskCopy, wantDone)
 			// clear guard once backend confirmed the change
-			if s2, err := store.New(config.DBPath()); err == nil {
+			if s2, err := store.New(config.DBPath(), config.Shared()); err == nil {
 				_ = s2.ClearPendingStatus(context.Background(), taskCopy.Title, taskCopy.List)
 				s2.Close()
 			}
@@ -1945,7 +1945,7 @@ func postponeCmd(t *models.Task, newDue time.Time) tea.Cmd {
 		if err := providerPostpone(&taskCopy, newDue); err != nil {
 			return postponeMsg{err}
 		}
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return postponeMsg{}
 		}
@@ -1960,7 +1960,7 @@ func undoDeleteCmd(t *models.Task) tea.Cmd {
 		t.ID = "taskctl-" + uuid.New().String()
 		t.Status = "needsAction"
 		t.CompletedAt = nil
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return taskSavedMsg{}
 		}
@@ -1980,7 +1980,7 @@ func undoDeleteCmd(t *models.Task) tea.Cmd {
 func persistSubtaskEditCmd(t *models.Task) tea.Cmd {
 	tCopy := *t
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return nil
 		}
@@ -1992,7 +1992,7 @@ func persistSubtaskEditCmd(t *models.Task) tea.Cmd {
 
 func batchCompleteCmd(tasks []*models.Task) tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return batchDoneMsg{err}
 		}
@@ -2018,7 +2018,7 @@ func batchDeleteCmd(tasks []*models.Task) tea.Cmd {
 	}
 	return func() tea.Msg {
 		ctx := context.Background()
-		s, _ := store.New(config.DBPath())
+		s, _ := store.New(config.DBPath(), config.Shared())
 		if s != nil {
 			defer s.Close()
 		}
@@ -2241,7 +2241,7 @@ func startOfDay(t time.Time) time.Time {
 
 func loadCachedListEntriesCmd() tea.Cmd {
 	return func() tea.Msg {
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err != nil {
 			return listNamesMsg{}
 		}
@@ -2256,7 +2256,7 @@ func loadAllListNamesCmd() tea.Cmd {
 		entries, err := reminders.ListListsWithAccounts()
 		// persist to SQLite cache so next startup is instant
 		if len(entries) > 0 {
-			if s, dbErr := store.New(config.DBPath()); dbErr == nil {
+			if s, dbErr := store.New(config.DBPath(), config.Shared()); dbErr == nil {
 				_ = s.StoreListEntries(context.Background(), entries, "apple")
 				s.Close()
 			}

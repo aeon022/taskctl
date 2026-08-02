@@ -23,7 +23,7 @@ var doneCmd = &cobra.Command{
 
 		// write SQLite first, then call AppleScript
 		ctx := context.Background()
-		s, err := store.New(config.DBPath())
+		s, err := store.New(config.DBPath(), config.Shared())
 		if err == nil {
 			defer s.Close()
 			tasks, _ := s.ListTasks(ctx, store.ListFilter{List: doneList, Status: "needsAction"})
