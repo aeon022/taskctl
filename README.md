@@ -308,6 +308,18 @@ taskctl bridges two systems: Apple Reminders (the source of truth for data) and 
 
 **Local cache:** `~/Library/Application Support/taskctl/taskctl.db` (SQLite). All reads in the TUI and CLI hit this cache; syncs update it.
 
+### Syncing the cache file across devices
+
+This is a different concern from the Apple Reminders sync above: that pulls task data *from* Apple's servers; this is about sharing taskctl's own local cache file *between your own devices*. By default the cache is local to this machine. To share it, set `data_dir` (in `~/.config/taskctl/config.yaml`) or the `TASKCTL_DATA_DIR` env var to a folder you already sync yourself — iCloud Drive, Dropbox, Syncthing, etc:
+
+```bash
+export TASKCTL_DATA_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/taskctl"
+```
+
+Once set, taskctl automatically switches its SQLite journal mode from WAL to rollback-journal — WAL splits the database across multiple files that a folder-sync client can't update atomically together, so this switch keeps the directory down to a single consistent file whenever taskctl isn't actively writing. A same-machine lock also prevents two taskctl processes from opening the cache at once (run `taskctl doctor` to see the current mode and path). This only protects against the same-machine and stale-snapshot failure modes, not two machines editing at the exact same instant; an undownloaded iCloud file is reported explicitly rather than as a bare error.
+
+Note: if you also use timectl's task-picker ("T"), it resolves taskctl's data directory the same way (via `TASKCTL_DATA_DIR`) — but only if you set it as an env var, not if you only set `data_dir` in taskctl's config file.
+
 ### Conflict resolution
 
 Local changes made between syncs are protected by two tables in the SQLite database:
