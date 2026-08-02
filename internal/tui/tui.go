@@ -187,7 +187,10 @@ type Model struct {
 	// delete confirm
 	deleteTarget *models.Task
 	// detail popup (enter)
-	detailTarget *models.Task
+	detailTarget  *models.Task
+	subtaskCursor int
+	addingSubtask bool
+	subtaskInput  textinput.Model
 	// undo
 	lastDeleted *models.Task
 	// transient confirmation (e.g. "Copied to clipboard"), auto-clears
@@ -222,12 +225,17 @@ func newModel(openTaskID string) Model {
 	si.Placeholder = "search…"
 	si.CharLimit = 80
 
+	sti := textinput.New()
+	sti.Placeholder = "Subtask title…"
+	sti.CharLimit = 200
+
 	var state persistedState
 	uistate.Load(config.UIStatePath(), &state)
 
 	return Model{
 		loading:      true,
 		searchInput:  si,
+		subtaskInput: sti,
 		sp:           sp,
 		hoverRow:     -1,
 		lastClickRow: -1,
@@ -282,6 +290,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !r.isHeader && r.task != nil && r.task.ID == m.openTaskID {
 					m.cursor = i
 					m.detailTarget = r.task
+					m.subtaskCursor = 0
 					m.view = viewDetail
 					break
 				}
@@ -433,6 +442,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.lastClickRow = -1 // consumed, so a third click starts fresh
 					if t := cursorTask(m); t != nil {
 						m.detailTarget = t
+						m.subtaskCursor = 0
 						m.view = viewDetail
 					}
 					return m, nil
@@ -516,13 +526,66 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// ── task detail popup ────────────────────────────────────────────────
 	if m.view == viewDetail {
 		t := m.detailTarget
+
+		if m.addingSubtask {
+			switch msg.String() {
+			case "enter":
+				title := strings.TrimSpace(m.subtaskInput.Value())
+				m.addingSubtask = false
+				m.subtaskInput.Blur()
+				m.subtaskInput.SetValue("")
+				if title != "" && t != nil {
+					t.Subtasks = append(t.Subtasks, models.Subtask{Title: title})
+					m.subtaskCursor = len(t.Subtasks) - 1
+					return m, persistSubtaskEditCmd(t)
+				}
+				return m, nil
+			case "esc":
+				m.addingSubtask = false
+				m.subtaskInput.Blur()
+				m.subtaskInput.SetValue("")
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.subtaskInput, cmd = m.subtaskInput.Update(msg)
+			return m, cmd
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "q", "esc", "enter":
 			m.view = viewList
 			m.detailTarget = nil
+			m.subtaskCursor = 0
 			return m, nil
+		case "j", "down":
+			if t != nil && m.subtaskCursor < len(t.Subtasks)-1 {
+				m.subtaskCursor++
+			}
+		case "k", "up":
+			if m.subtaskCursor > 0 {
+				m.subtaskCursor--
+			}
+		case " ":
+			if t != nil && m.subtaskCursor < len(t.Subtasks) {
+				t.Subtasks[m.subtaskCursor].Done = !t.Subtasks[m.subtaskCursor].Done
+				return m, persistSubtaskEditCmd(t)
+			}
+		case "a":
+			if t != nil {
+				m.addingSubtask = true
+				m.subtaskInput.SetValue("")
+				return m, m.subtaskInput.Focus()
+			}
+		case "x":
+			if t != nil && m.subtaskCursor < len(t.Subtasks) {
+				t.Subtasks = append(t.Subtasks[:m.subtaskCursor], t.Subtasks[m.subtaskCursor+1:]...)
+				if m.subtaskCursor >= len(t.Subtasks) {
+					m.subtaskCursor = max(0, len(t.Subtasks)-1)
+				}
+				return m, persistSubtaskEditCmd(t)
+			}
 		case "o":
 			if t != nil {
 				if u := effectiveURL(t); u != "" {
@@ -836,6 +899,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "enter":
 		if t := cursorTask(m); t != nil {
 			m.detailTarget = t
+			m.subtaskCursor = 0
 			m.view = viewDetail
 		}
 		return m, nil
@@ -1216,7 +1280,7 @@ func (m Model) helpContent() string {
 	b.WriteString(row("c", "show / hide completed tasks"))
 	b.WriteString(section("Tasks"))
 	b.WriteString(row("space", "toggle done"))
-	b.WriteString(row("enter", "task details"))
+	b.WriteString(row("enter", "task details (a subtask, space toggle, x remove)"))
 	b.WriteString(row("n", "new task"))
 	b.WriteString(row("e", "edit task"))
 	b.WriteString(row("d", "delete task (asks to confirm)"))
@@ -1317,6 +1381,26 @@ func (m Model) renderDetailPopup() string {
 	} else if url != "" {
 		b.WriteString(label("URL") + styleDue.Render(url) + styleSubhead.Render(" (from notes)") + "\n")
 	}
+	if len(t.Subtasks) > 0 || m.addingSubtask {
+		b.WriteString(rule + "\n" + label("Subtasks") + "\n")
+		for i, st := range t.Subtasks {
+			box := styleSubhead.Render("[ ]")
+			text := st.Title
+			if st.Done {
+				box = styleSelected.Render("[x]")
+				text = styleSubhead.Render(st.Title)
+			}
+			cursor := "  "
+			if i == m.subtaskCursor && !m.addingSubtask {
+				cursor = styleSelected.Render("› ")
+			}
+			b.WriteString(cursor + box + " " + text + "\n")
+		}
+		if m.addingSubtask {
+			b.WriteString("  " + styleKey.Render("+") + " " + m.subtaskInput.View() + "\n")
+		}
+	}
+
 	if t.Notes != "" {
 		b.WriteString(rule + "\n" + label("Notes") + "\n" + t.Notes + "\n")
 	}
@@ -1325,7 +1409,11 @@ func (m Model) renderDetailPopup() string {
 	if url != "" {
 		footer = "o open url  " + footer
 	}
-	footer += "  esc/enter close"
+	if m.addingSubtask {
+		footer = "enter add  esc cancel"
+	} else {
+		footer = "a subtask  space toggle  x remove  " + footer + "  esc/enter close"
+	}
 	b.WriteString("\n" + styleSubhead.Render(footer))
 
 	return stylePopupBorder.Width(popW).Render(b.String())
@@ -1881,6 +1969,24 @@ func undoDeleteCmd(t *models.Task) tea.Cmd {
 		_ = s.UpsertTask(context.Background(), t)
 		go providerCreate(t)
 		return taskSavedMsg{}
+	}
+}
+
+// persistSubtaskEditCmd persists a task after a subtask mutation
+// (add/toggle/delete). The subtask edit already mutated t in place (it
+// points into m.tasks), so the UI reflects the change immediately — this
+// just writes it through to the local cache, same "flip locally, save
+// async" approach batch mode uses.
+func persistSubtaskEditCmd(t *models.Task) tea.Cmd {
+	tCopy := *t
+	return func() tea.Msg {
+		s, err := store.New(config.DBPath())
+		if err != nil {
+			return nil
+		}
+		defer s.Close()
+		_ = s.UpsertTask(context.Background(), &tCopy)
+		return nil
 	}
 }
 

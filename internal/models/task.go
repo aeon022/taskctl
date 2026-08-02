@@ -10,16 +10,25 @@ type ListEntry struct {
 	Color    string // hex "#RRGGBB", "" if the list uses no custom color
 }
 
+// Subtask is one checklist item within a Task. Local-only — not synced to
+// Apple Reminders, which has no scriptable/EventKit-exposed subtask concept
+// (its own visual checklist feature isn't reachable via EKReminder).
+type Subtask struct {
+	Title string `json:"title"`
+	Done  bool   `json:"done"`
+}
+
 type Task struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	List        string     `json:"list"`
 	Notes       string     `json:"notes"`
-	URL         string     `json:"url"` // matches EKReminder.url / Reminders.app's own URL field
+	URL         string     `json:"url"`    // matches EKReminder.url / Reminders.app's own URL field
 	Status      string     `json:"status"` // "needsAction" | "completed"
 	DueDate     *time.Time `json:"due_date,omitempty"`
-	Priority    int        `json:"priority"` // 0=none, 1=high, 5=medium, 9=low
+	Priority    int        `json:"priority"`   // 0=none, 1=high, 5=medium, 9=low
 	Recurrence  string     `json:"recurrence"` // "" | "daily" | "weekly" | "monthly"
+	Subtasks    []Subtask  `json:"subtasks,omitempty"`
 	ExternalID  string     `json:"external_id"`
 	Source      string     `json:"source"`
 	CreatedAt   time.Time  `json:"created_at"`

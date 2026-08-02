@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -72,6 +73,7 @@ func (s *Store) migrate() error {
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN url TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE lists ADD COLUMN provider TEXT NOT NULL DEFAULT 'apple'`)
 	_, _ = s.db.Exec(`ALTER TABLE lists ADD COLUMN color TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN subtasks TEXT NOT NULL DEFAULT '[]'`)
 	return nil
 }
 
@@ -85,16 +87,20 @@ func (s *Store) UpsertTask(ctx context.Context, t *models.Task) error {
 		v := t.CompletedAt.UTC().Format(time.RFC3339)
 		completedAt = &v
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO tasks (id,title,list,notes,url,status,due_date,priority,recurrence,external_id,source,created_at,updated_at,completed_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	subtasks, err := json.Marshal(t.Subtasks)
+	if err != nil {
+		return fmt.Errorf("marshal subtasks: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO tasks (id,title,list,notes,url,status,due_date,priority,recurrence,subtasks,external_id,source,created_at,updated_at,completed_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			title=excluded.title, list=excluded.list, notes=excluded.notes, url=excluded.url,
 			status=excluded.status, due_date=excluded.due_date, priority=excluded.priority,
-			recurrence=excluded.recurrence,
+			recurrence=excluded.recurrence, subtasks=excluded.subtasks,
 			updated_at=excluded.updated_at, completed_at=excluded.completed_at
 	`,
-		t.ID, t.Title, t.List, t.Notes, t.URL, t.Status, due, t.Priority, t.Recurrence,
+		t.ID, t.Title, t.List, t.Notes, t.URL, t.Status, due, t.Priority, t.Recurrence, string(subtasks),
 		t.ExternalID, t.Source,
 		t.CreatedAt.UTC().Format(time.RFC3339),
 		t.UpdatedAt.UTC().Format(time.RFC3339),
@@ -109,7 +115,7 @@ type ListFilter struct {
 }
 
 func (s *Store) ListTasks(ctx context.Context, f ListFilter) ([]models.Task, error) {
-	query := `SELECT id,title,list,notes,url,status,due_date,priority,recurrence,external_id,source,created_at,updated_at,completed_at FROM tasks WHERE 1=1`
+	query := `SELECT id,title,list,notes,url,status,due_date,priority,recurrence,subtasks,external_id,source,created_at,updated_at,completed_at FROM tasks WHERE 1=1`
 	var args []any
 	if f.List != "" {
 		query += ` AND list = ?`
@@ -185,7 +191,7 @@ func (s *Store) DailyCompletions(ctx context.Context, days int) ([]int, error) {
 
 	counts := make([]int, days)
 	for i := range days {
-		d := time.Now().AddDate(0, 0, -(days-1-i))
+		d := time.Now().AddDate(0, 0, -(days - 1 - i))
 		key := fmt.Sprintf("%04d-%02d-%02d", d.Year(), d.Month(), d.Day())
 		counts[i] = byDay[key]
 	}
@@ -378,9 +384,9 @@ func scanTasks(rows *sql.Rows) ([]models.Task, error) {
 	for rows.Next() {
 		var t models.Task
 		var due, completedAt sql.NullString
-		var createdStr, updatedStr string
+		var createdStr, updatedStr, subtasksStr string
 		if err := rows.Scan(
-			&t.ID, &t.Title, &t.List, &t.Notes, &t.URL, &t.Status, &due, &t.Priority, &t.Recurrence,
+			&t.ID, &t.Title, &t.List, &t.Notes, &t.URL, &t.Status, &due, &t.Priority, &t.Recurrence, &subtasksStr,
 			&t.ExternalID, &t.Source, &createdStr, &updatedStr, &completedAt,
 		); err != nil {
 			return nil, err
@@ -395,6 +401,7 @@ func scanTasks(rows *sql.Rows) ([]models.Task, error) {
 			c := parseTime(completedAt.String)
 			t.CompletedAt = &c
 		}
+		_ = json.Unmarshal([]byte(subtasksStr), &t.Subtasks)
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
