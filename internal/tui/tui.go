@@ -1599,6 +1599,13 @@ func (m Model) listHeight() int {
 	if m.searching {
 		h -= 2
 	}
+	if m.inPalette {
+		// input line + up to 6 match rows + trailing blank — must match
+		// what the palette block in View() actually renders, or the task
+		// list below overflows the terminal and pushes the input/matches
+		// themselves off the top of the screen.
+		h -= 8
+	}
 	return h
 }
 
