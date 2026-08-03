@@ -4,11 +4,54 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aeon022/missionctl-core/palette"
 	"github.com/aeon022/taskctl/internal/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 )
+
+func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
+	m := newModel("")
+	m.width, m.height = 100, 30
+
+	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	m = mi.(Model)
+	if !m.inPalette {
+		t.Fatal("expected inPalette after ':'")
+	}
+
+	for _, r := range "new" {
+		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = mi.(Model)
+	}
+	matches := palette.Match(paletteCommands, m.paletteInput.Value())
+	if len(matches) == 0 || matches[0].Name != "new" {
+		t.Fatalf("expected 'new' to be the top match for query %q, got %v", m.paletteInput.Value(), matches)
+	}
+
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mi.(Model)
+	if m.inPalette {
+		t.Error("expected palette to close after executing a command")
+	}
+	if m.view != viewCreate {
+		t.Errorf("expected 'new' command to replay 'n' and open viewCreate, got %v", m.view)
+	}
+}
+
+func TestCommandPalette_EscCloses(t *testing.T) {
+	m := newModel("")
+	m.width, m.height = 100, 30
+	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	m = mi.(Model)
+
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mi.(Model)
+	if m.inPalette {
+		t.Error("expected esc to close the palette")
+	}
+}
 
 func TestHelpOverlay_OpenScrollClose(t *testing.T) {
 	m := Model{width: 100, height: 30}

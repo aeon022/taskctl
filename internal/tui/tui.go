@@ -12,6 +12,7 @@ import (
 	"github.com/aeon022/missionctl-core/lastsync"
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
+	"github.com/aeon022/missionctl-core/palette"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/uistate"
 	"github.com/aeon022/taskctl/internal/config"
@@ -204,6 +205,10 @@ type Model struct {
 	// search
 	searching   bool
 	searchInput textinput.Model
+	// ":" command palette
+	inPalette     bool
+	paletteInput  textinput.Model
+	paletteCursor int
 	// pomodoro
 	pomTask    *models.Task
 	pomStart   time.Time
@@ -217,6 +222,35 @@ type Model struct {
 	helpPopH int
 }
 
+// ── command palette (":") ────────────────────────────────────────────────────
+//
+// Types out full words instead of memorizing single-key shortcuts. Reuses
+// the exact same key handling every shortcut already goes through (the
+// list-view switch in Update) by replaying the mapped keypress through
+// Update itself, so behavior is guaranteed identical to typing the key
+// directly. Matching logic lives in missionctl-core/palette (shared across
+// the suite); this list of commands is taskctl-specific.
+var paletteCommands = []palette.Command{
+	{Name: "new", Desc: "New task", Key: "n"},
+	{Name: "edit", Desc: "Edit selected task", Key: "e"},
+	{Name: "delete", Desc: "Delete selected task", Key: "d"},
+	{Name: "toggle", Desc: "Toggle done", Key: " "},
+	{Name: "detail", Desc: "Task details", Key: "enter"},
+	{Name: "postpone", Desc: "Postpone to tomorrow", Key: "S"},
+	{Name: "copy", Desc: "Copy title to clipboard", Key: "y"},
+	{Name: "undo", Desc: "Undo last action", Key: "u"},
+	{Name: "search", Desc: "Search tasks", Key: "/"},
+	{Name: "focus", Desc: "Focus mode — today & overdue only", Key: "t"},
+	{Name: "overdue", Desc: "Filter — overdue only", Key: "O"},
+	{Name: "completed", Desc: "Show / hide completed tasks", Key: "c"},
+	{Name: "select", Desc: "Select mode (batch actions)", Key: "v"},
+	{Name: "pomodoro", Desc: "Pomodoro timer for selected task", Key: "p"},
+	{Name: "stats", Desc: "Stats", Key: "i"},
+	{Name: "sync", Desc: "Sync with Apple Reminders", Key: "s"},
+	{Name: "help", Desc: "Show help", Key: "?"},
+	{Name: "quit", Desc: "Quit taskctl", Key: "q"},
+}
+
 func newModel(openTaskID string) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
@@ -225,6 +259,10 @@ func newModel(openTaskID string) Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 80
+
+	pi := textinput.New()
+	pi.Placeholder = "command…"
+	pi.CharLimit = 40
 
 	sti := textinput.New()
 	sti.Placeholder = "Subtask title…"
@@ -236,6 +274,7 @@ func newModel(openTaskID string) Model {
 	return Model{
 		loading:      true,
 		searchInput:  si,
+		paletteInput: pi,
 		subtaskInput: sti,
 		sp:           sp,
 		hoverRow:     -1,
@@ -674,6 +713,56 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// ── command palette mode ──────────────────────────────────────────────
+	if m.inPalette {
+		closePalette := func(mm Model) Model {
+			mm.inPalette = false
+			mm.paletteInput.Blur()
+			mm.paletteInput.SetValue("")
+			mm.paletteCursor = 0
+			return mm
+		}
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			return closePalette(m), nil
+		case "up", "ctrl+p":
+			if m.paletteCursor > 0 {
+				m.paletteCursor--
+			}
+			return m, nil
+		case "down", "ctrl+n":
+			matches := palette.Match(paletteCommands, m.paletteInput.Value())
+			if m.paletteCursor < len(matches)-1 {
+				m.paletteCursor++
+			}
+			return m, nil
+		case "enter":
+			matches := palette.Match(paletteCommands, m.paletteInput.Value())
+			if len(matches) == 0 {
+				return closePalette(m), nil
+			}
+			if m.paletteCursor >= len(matches) {
+				m.paletteCursor = len(matches) - 1
+			}
+			chosen := matches[m.paletteCursor]
+			m = closePalette(m)
+			replay := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(chosen.Key)}
+			if chosen.Key == "enter" {
+				replay = tea.KeyMsg{Type: tea.KeyEnter}
+			} else if chosen.Key == " " {
+				replay = tea.KeyMsg{Type: tea.KeySpace}
+			}
+			newM, cmd := m.Update(replay)
+			return newM.(Model), cmd
+		}
+		var cmd tea.Cmd
+		m.paletteInput, cmd = m.paletteInput.Update(msg)
+		m.paletteCursor = 0
+		return m, cmd
+	}
+
 	// ── search mode ───────────────────────────────────────────────────────
 	if m.searching {
 		switch msg.String() {
@@ -893,6 +982,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.searchInput.SetValue("")
 		return m, m.searchInput.Focus()
 
+	case ":":
+		m.inPalette = true
+		m.paletteCursor = 0
+		m.paletteInput.SetValue("")
+		return m, m.paletteInput.Focus()
+
 	case "i":
 		m.view = viewStats
 		return m, loadStats()
@@ -1040,6 +1135,26 @@ func (m Model) renderList() string {
 
 	if m.searching {
 		b.WriteString("  " + styleKey.Render("/") + " " + m.searchInput.View() + "  (enter/esc to close)\n\n")
+	}
+
+	if m.inPalette {
+		b.WriteString("  " + styleKey.Render(":") + " " + m.paletteInput.View() + "\n")
+		matches := palette.Match(paletteCommands, m.paletteInput.Value())
+		if len(matches) > 6 {
+			matches = matches[:6]
+		}
+		if len(matches) == 0 {
+			b.WriteString("    " + styleSubhead.Render("no matching command") + "\n")
+		}
+		for i, c := range matches {
+			row := fmt.Sprintf("%-11s %s", c.Name, c.Desc)
+			if i == m.paletteCursor {
+				b.WriteString("    " + styleSelected.Render("▶ "+row) + "\n")
+			} else {
+				b.WriteString("      " + styleSubhead.Render(row) + "\n")
+			}
+		}
+		b.WriteString("\n")
 	}
 
 	query := m.searchQuery()
@@ -1272,6 +1387,7 @@ func (m Model) helpContent() string {
 		Row("k / ↑", "move up").
 		Row("1-9", "jump to the nth visible task").
 		Row("/", "search tasks (esc clears)").
+		Row(":", "command palette — type an action by name").
 		Row("t", "focus mode — today & overdue only").
 		Row("O", "filter — overdue only").
 		Row("c", "show / hide completed tasks").
