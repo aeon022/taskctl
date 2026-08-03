@@ -10,6 +10,7 @@ import (
 
 	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/lastsync"
+	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/uistate"
@@ -1265,38 +1266,34 @@ func (m Model) rowHitTest(y int) int {
 }
 
 func (m Model) helpContent() string {
-	key := func(k string) string { return styleKey.Render(fmt.Sprintf("%-9s", k)) }
-	row := func(k, desc string) string { return "  " + key(k) + styleSubhead.Render(desc) + "\n" }
-	section := func(t string) string { return "\n  " + styleHeader.Render(t) + "\n" }
-
-	var b strings.Builder
-	b.WriteString(section("Navigation"))
-	b.WriteString(row("j / ↓", "move down"))
-	b.WriteString(row("k / ↑", "move up"))
-	b.WriteString(row("1-9", "jump to the nth visible task"))
-	b.WriteString(row("/", "search tasks (esc clears)"))
-	b.WriteString(row("t", "focus mode — today & overdue only"))
-	b.WriteString(row("O", "filter — overdue only"))
-	b.WriteString(row("c", "show / hide completed tasks"))
-	b.WriteString(section("Tasks"))
-	b.WriteString(row("space", "toggle done"))
-	b.WriteString(row("enter", "task details (a subtask, space toggle, x remove)"))
-	b.WriteString(row("n", "new task"))
-	b.WriteString(row("e", "edit task"))
-	b.WriteString(row("d", "delete task (asks to confirm)"))
-	b.WriteString(row("o", "open task URL in browser"))
-	b.WriteString(row("S", "postpone to tomorrow"))
-	b.WriteString(row("y", "copy title to clipboard"))
-	b.WriteString(row("u", "undo last action"))
-	b.WriteString(section("Batch & Extras"))
-	b.WriteString(row("v", "select mode (space toggle, A all, enter done, d delete)"))
-	b.WriteString(row("p", "pomodoro timer for selected task"))
-	b.WriteString(row("i", "stats"))
-	b.WriteString(row("s", "sync with Apple Reminders"))
-	b.WriteString(section("Other"))
-	b.WriteString(row("?", "toggle this help"))
-	b.WriteString(row("q", "quit"))
-	return b.String()
+	return keymap.New("taskctl", "tasks from the terminal").
+		Section("Navigation").
+		Row("j / ↓", "move down").
+		Row("k / ↑", "move up").
+		Row("1-9", "jump to the nth visible task").
+		Row("/", "search tasks (esc clears)").
+		Row("t", "focus mode — today & overdue only").
+		Row("O", "filter — overdue only").
+		Row("c", "show / hide completed tasks").
+		Section("Tasks").
+		Row("space", "toggle done").
+		Row("enter", "task details (a subtask, space toggle, x remove)").
+		Row("n", "new task").
+		Row("e", "edit task").
+		Row("d", "delete task (asks to confirm)").
+		Row("o", "open task URL in browser").
+		Row("S", "postpone to tomorrow").
+		Row("y", "copy title to clipboard").
+		Row("u", "undo last action").
+		Section("Batch & Extras").
+		Row("v", "select mode (space toggle, A all, enter done, d delete)").
+		Row("p", "pomodoro timer for selected task").
+		Row("i", "stats").
+		Row("s", "sync with Apple Reminders").
+		Section("Other").
+		Row("?", "toggle this help").
+		Row("q", "quit").
+		String()
 }
 
 // openHelp sizes and populates the transient help popup (see
