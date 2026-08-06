@@ -393,13 +393,19 @@ end tell
 	return err
 }
 
-// DeleteTask deletes a reminder, searching all accounts.
+// DeleteTask deletes a reminder, searching all accounts. Returns an error
+// if no matching reminder was found anywhere — the previous version had no
+// way to signal that: the per-account `try` only guarded against a single
+// account erroring on the whose-search, and if nothing matched anywhere the
+// script just finished normally, reporting success while deleting nothing.
+// Same bug class fixed in calctl's DeleteEvent on 2026-08-01.
 func DeleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
 		listName = DefaultList()
 	}
 	script := fmt.Sprintf(`
+set wasDeleted to false
 tell application "Reminders"
 	repeat with a in accounts
 		try
@@ -407,14 +413,22 @@ tell application "Reminders"
 			set matchedTasks to (reminders in theList whose name is "%s")
 			if (count of matchedTasks) > 0 then
 				delete item 1 of matchedTasks
-				return
+				set wasDeleted to true
+				exit repeat
 			end if
 		end try
 	end repeat
 end tell
+return wasDeleted as string
 `, escapeAS(listName), escapeAS(t.Title))
-	_, err := runAppleScript(script)
-	return err
+	out, err := runAppleScript(script)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) != "true" {
+		return fmt.Errorf("no reminder found matching %q in list %q", t.Title, listName)
+	}
+	return nil
 }
 
 func fetchViaAppleScript(listName string) ([]models.Task, error) {
