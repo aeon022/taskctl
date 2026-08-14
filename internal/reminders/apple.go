@@ -579,13 +579,6 @@ func NotifyDueTasks(tasks []models.Task) {
 	_ = exec.Command("osascript", "-e", script).Run()
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func runAppleScript(script string) (string, error) {
 	cmd := exec.Command("osascript", "-e", script)
 	out, err := cmd.Output()

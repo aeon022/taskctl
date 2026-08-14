@@ -9,9 +9,8 @@ import (
 )
 
 type Config struct {
-	DefaultList   string   `mapstructure:"default_list"`
-	ExcludedLists []string `mapstructure:"excluded_lists"`
-	DataDir       string   `mapstructure:"data_dir"`
+	DefaultList string `mapstructure:"default_list"`
+	DataDir     string `mapstructure:"data_dir"`
 }
 
 var Active Config
@@ -28,7 +27,6 @@ func Load() error {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("default_list", "")
-	viper.SetDefault("excluded_lists", []string{})
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
