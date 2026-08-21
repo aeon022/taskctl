@@ -314,7 +314,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.height = msg.Height
+		// -1: reserves a row of slack so View() never emits exactly as many
+		// lines as the terminal height (charmbracelet/bubbletea#304 — that
+		// combined with no trailing newline can fail to fully redraw).
+		m.height = msg.Height - 1
+		if m.height < 1 {
+			m.height = 1
+		}
 
 	case tasksLoadedMsg:
 		m.tasks = msg.tasks
@@ -2408,7 +2414,7 @@ func endOfDay(t time.Time) time.Time {
 // task's detail popup as soon as tasks finish loading — used by `taskctl
 // --task <id>` to jump in directly from another tool's linked entry.
 func Run(openTaskID string) error {
-	p := tea.NewProgram(newModel(openTaskID), tea.WithAltScreen(), tea.WithMouseAllMotion())
+	p := tea.NewProgram(newModel(openTaskID), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithFPS(30))
 	_, err := p.Run()
 	return err
 }
