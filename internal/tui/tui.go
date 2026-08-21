@@ -16,7 +16,7 @@ import (
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/uistate"
 	"github.com/aeon022/taskctl/internal/config"
-	"github.com/aeon022/taskctl/internal/dateutil"
+	"github.com/aeon022/missionctl-core/dateutil"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/nlpdate"
 	"github.com/aeon022/taskctl/internal/reminders"

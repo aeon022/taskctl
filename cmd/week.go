@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
-	"github.com/aeon022/taskctl/internal/dateutil"
+	"github.com/aeon022/missionctl-core/dateutil"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/spf13/cobra"
 )
