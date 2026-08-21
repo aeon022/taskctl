@@ -10,7 +10,6 @@ import (
 
 type Config struct {
 	DefaultList string `mapstructure:"default_list"`
-	DataDir     string `mapstructure:"data_dir"`
 }
 
 var Active Config
@@ -56,10 +55,7 @@ func DBPath() string {
 		resolved, _ := coreconfig.ResolveDir("taskctl", dir)
 		return filepath.Join(resolved, "taskctl.db")
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "Library", "Application Support", "taskctl")
-	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "taskctl.db")
+	return appSupportFile("taskctl.db")
 }
 
 // Shared reports whether DBPath currently resolves to a user-configured
@@ -71,17 +67,20 @@ func Shared() bool {
 // UIStatePath is where the TUI persists small preferences (last active
 // filter mode) — see missionctl-core/uistate.
 func UIStatePath() string {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "Library", "Application Support", "taskctl")
-	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "ui_state.json")
+	return appSupportFile("ui_state.json")
 }
 
 // LastSyncedPath is the marker file (see missionctl-core/lastsync) tracking
 // when a sync last completed, for the TUI's "synced Xh ago" indicator.
 func LastSyncedPath() string {
+	return appSupportFile("last_synced")
+}
+
+// appSupportFile returns the path to name inside taskctl's private
+// ~/Library/Application Support/taskctl directory, creating it if needed.
+func appSupportFile(name string) string {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, "Library", "Application Support", "taskctl")
 	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "last_synced")
+	return filepath.Join(dir, name)
 }

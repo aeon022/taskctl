@@ -3,11 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"strings"
-	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/reminders"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -30,42 +28,8 @@ a launchd job, e.g. once each morning.`,
 			return err
 		}
 
-		eod := endOfDay(time.Now())
-		sod := startOfDay(time.Now())
-		var due, overdue []string
-		for _, t := range tasks {
-			if t.DueDate == nil || t.DueDate.After(eod) {
-				continue
-			}
-			if t.DueDate.Before(sod) {
-				overdue = append(overdue, t.Title)
-			} else {
-				due = append(due, t.Title)
-			}
-		}
-
-		if len(due) == 0 && len(overdue) == 0 {
-			fmt.Println("No tasks due today or overdue — nothing to remind.")
-			return nil
-		}
-
-		title := fmt.Sprintf("%d task(s) due today", len(due)+len(overdue))
-		if len(overdue) > 0 {
-			title = fmt.Sprintf("%d due today, %d overdue", len(due), len(overdue))
-		}
-		body := strings.Join(append(overdue, due...), ", ")
-
-		script := fmt.Sprintf(`display notification %q with title %q`, body, title)
-		out, err := exec.Command("osascript", "-e", script).CombinedOutput()
-		if err != nil {
-			fmt.Printf("Reminder: %s — %s\n", title, body)
-			if len(out) > 0 {
-				fmt.Printf("osascript: %s\n", strings.TrimSpace(string(out)))
-			}
-			return nil
-		}
-
-		fmt.Printf("Notified: %s\n", body)
+		reminders.NotifyDueTasks(tasks)
+		fmt.Println("Reminder check complete.")
 		return nil
 	},
 }

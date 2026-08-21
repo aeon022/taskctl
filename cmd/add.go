@@ -1,16 +1,13 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
-	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/nlpdate"
-	"github.com/aeon022/taskctl/internal/reminders"
 	"github.com/aeon022/taskctl/internal/store"
-	"github.com/google/uuid"
+	"github.com/aeon022/taskctl/internal/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -27,43 +24,22 @@ var addCmd = &cobra.Command{
 	Example: `  taskctl add "Call dentist" --due 2026-07-05 --list Privat`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		list := addList
-		if list == "" {
-			list = config.Active.DefaultList
-		}
-		if list == "" {
-			// Same list CreateTask falls back to — resolve it here too so
-			// the local cache entry matches what Apple actually creates.
-			list = reminders.DefaultList()
-		}
-		t := &models.Task{
-			ID:        "taskctl-" + uuid.New().String(),
-			Title:     args[0],
-			List:      list,
-			Notes:     addNotes,
-			URL:       addURL,
-			Status:    "needsAction",
-			Source:    "taskctl",
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
+		var due *time.Time
 		if addDue != "" {
 			d, err := nlpdate.Parse(addDue)
 			if err != nil {
 				return err
 			}
-			t.DueDate = d
+			due = d
 		}
 
-		ctx := context.Background()
 		s, err := store.New(config.DBPath(), config.Shared())
 		if err == nil {
 			defer s.Close()
-			_ = s.ClearPendingDelete(ctx, t.Title, t.List)
-			_ = s.UpsertTask(ctx, t)
 		}
 
-		if err := reminders.CreateTask(t); err != nil {
+		t, err := tasks.Create(s, args[0], addList, addNotes, addURL, due)
+		if err != nil {
 			return fmt.Errorf("create: %w", err)
 		}
 
@@ -71,11 +47,11 @@ var addCmd = &cobra.Command{
 			outputJSON(map[string]any{"tool": "taskctl", "command": "add", "status": "created", "task": t})
 			return nil
 		}
-		due := ""
+		dueOut := ""
 		if t.DueDate != nil {
-			due = "  due " + t.DueDate.Format("Mon, Jan 02 2006")
+			dueOut = "  due " + t.DueDate.Format("Mon, Jan 02 2006")
 		}
-		fmt.Printf("Created: %s%s\n", t.Title, due)
+		fmt.Printf("Created: %s%s\n", t.Title, dueOut)
 		return nil
 	},
 }

@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/dateutil"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/reminders"
 	"github.com/aeon022/taskctl/internal/store"
-	"github.com/google/uuid"
+	"github.com/aeon022/taskctl/internal/tasks"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -100,7 +101,7 @@ func handleToday(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult,
 	}
 
 	today := time.Now()
-	eod := endOfDay(today)
+	eod := dateutil.EndOfDay(today)
 	var due []models.Task
 	for _, t := range tasks {
 		if t.DueDate != nil && !t.DueDate.After(eod) {
@@ -122,7 +123,7 @@ func handleWeekTasks(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolRes
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	mon, sun := weekBounds()
+	mon, sun := dateutil.WeekRange(time.Now())
 	var due []models.Task
 	for _, t := range tasks {
 		if t.DueDate != nil && !t.DueDate.Before(mon) && !t.DueDate.After(sun) {
@@ -132,19 +133,6 @@ func handleWeekTasks(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolRes
 	header := fmt.Sprintf("Tasks this week (%s – %s)",
 		mon.Format("Mon Jan 02"), sun.Format("Mon Jan 02"))
 	return mcp.NewToolResultText(formatTasks(due, header)), nil
-}
-
-func weekBounds() (time.Time, time.Time) {
-	now := time.Now()
-	wd := int(now.Weekday())
-	if wd == 0 {
-		wd = 7
-	}
-	mon := now.AddDate(0, 0, -(wd - 1))
-	mon = time.Date(mon.Year(), mon.Month(), mon.Day(), 0, 0, 0, 0, time.Local)
-	sun := mon.AddDate(0, 0, 6)
-	sun = time.Date(sun.Year(), sun.Month(), sun.Day(), 23, 59, 59, 0, time.Local)
-	return mon, sun
 }
 
 func handleListTasks(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -205,51 +193,31 @@ func handleCreateTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	if title == "" {
 		return mcp.NewToolResultError("title is required"), nil
 	}
-	if listName == "" {
-		listName = config.Active.DefaultList
-	}
-	if listName == "" {
-		// Same list CreateTask falls back to — resolve it here too so the
-		// local cache entry matches what Apple actually creates.
-		listName = reminders.DefaultList()
-	}
 
-	t := &models.Task{
-		ID:        "taskctl-" + uuid.New().String(),
-		Title:     title,
-		List:      listName,
-		Notes:     notes,
-		URL:       url,
-		Status:    "needsAction",
-		Source:    "taskctl",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	var due *time.Time
 	if dueStr != "" {
 		d, err := time.ParseInLocation("2006-01-02", dueStr, time.Local)
 		if err != nil {
 			return mcp.NewToolResultError("invalid due_date: " + err.Error()), nil
 		}
-		t.DueDate = &d
+		due = &d
 	}
 
-	ctx := context.Background()
 	s, err := store.New(config.DBPath(), config.Shared())
 	if err == nil {
 		defer s.Close()
-		_ = s.ClearPendingDelete(ctx, t.Title, t.List)
-		_ = s.UpsertTask(ctx, t)
 	}
 
-	if err := reminders.CreateTask(t); err != nil {
+	t, err := tasks.Create(s, title, listName, notes, url, due)
+	if err != nil {
 		return mcp.NewToolResultError("create failed: " + err.Error()), nil
 	}
 
-	due := ""
+	dueOut := ""
 	if t.DueDate != nil {
-		due = " due " + t.DueDate.Format("Mon, Jan 02 2006")
+		dueOut = " due " + t.DueDate.Format("Mon, Jan 02 2006")
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Created: %s%s", title, due)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Created: %s%s", title, dueOut)), nil
 }
 
 func handleCompleteTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -260,29 +228,13 @@ func handleCompleteTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 		return mcp.NewToolResultError("title is required"), nil
 	}
 
-	// write SQLite first, then call AppleScript
-	ctx := context.Background()
 	s, err := store.New(config.DBPath(), config.Shared())
 	if err == nil {
 		defer s.Close()
-		tasks, _ := s.ListTasks(ctx, store.ListFilter{List: listName, Status: "needsAction"})
-		for i := range tasks {
-			if tasks[i].Title == title {
-				tasks[i].Status = "completed"
-				_ = s.UpsertTask(ctx, &tasks[i])
-				break
-			}
-		}
-		_ = s.AddPendingStatus(ctx, title, listName, "completed")
 	}
 
-	t := &models.Task{Title: title, List: listName}
-	if err := reminders.CompleteTask(t); err != nil {
+	if err := tasks.Complete(s, title, listName); err != nil {
 		return mcp.NewToolResultError("complete failed: " + err.Error()), nil
-	}
-
-	if s != nil {
-		_ = s.ClearPendingStatus(ctx, title, listName)
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Completed: %s", title)), nil
 }
@@ -295,25 +247,12 @@ func handleDeleteTask(_ context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 		return mcp.NewToolResultError("title is required"), nil
 	}
 
-	t := &models.Task{Title: title, List: listName}
-
-	// write SQLite first, then call AppleScript
-	ctx := context.Background()
 	s, err := store.New(config.DBPath(), config.Shared())
 	if err == nil {
 		defer s.Close()
-		tasks, _ := s.ListTasks(ctx, store.ListFilter{List: listName})
-		for i := range tasks {
-			if tasks[i].Title == title {
-				t = &tasks[i]
-				break
-			}
-		}
-		_ = s.DeleteByID(ctx, t.ID)
-		_ = s.AddPendingDelete(ctx, t)
 	}
 
-	if err := reminders.DeleteTask(t); err != nil {
+	if err := tasks.Delete(s, title, listName); err != nil {
 		return mcp.NewToolResultError("delete failed: " + err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Deleted: %s", title)), nil
@@ -348,9 +287,4 @@ func formatTasks(tasks []models.Task, heading string) string {
 		b.WriteString(fmt.Sprintf("  %s %s%s%s\n", mark, t.Title, due, url))
 	}
 	return b.String()
-}
-
-func endOfDay(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 23, 59, 59, 0, t.Location())
 }

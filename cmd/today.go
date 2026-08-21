@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/dateutil"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/spf13/cobra"
@@ -26,7 +28,7 @@ var todayCmd = &cobra.Command{
 			return err
 		}
 
-		eod := endOfDay(time.Now())
+		eod := dateutil.EndOfDay(time.Now())
 		var due, overdue []string
 		var dueTasks []models.Task
 		curList := ""
@@ -38,7 +40,7 @@ var todayCmd = &cobra.Command{
 			}
 			dueTasks = append(dueTasks, t)
 			prefix := "○"
-			if t.DueDate.Before(startOfDay(time.Now())) {
+			if t.DueDate.Before(dateutil.StartOfDay(time.Now())) {
 				prefix = "!"
 				overdue = append(overdue, t.Title)
 			} else {
@@ -50,10 +52,10 @@ var todayCmd = &cobra.Command{
 				}
 				curList = t.List
 				lines = append(lines, t.List)
-				lines = append(lines, repeat("─", len(t.List)+2))
+				lines = append(lines, strings.Repeat("─", len(t.List)+2))
 			}
 			dueStr := ""
-			if t.DueDate.Before(startOfDay(time.Now())) {
+			if t.DueDate.Before(dateutil.StartOfDay(time.Now())) {
 				dueStr = "  [overdue " + t.DueDate.Format("Jan 02") + "]"
 			}
 			lines = append(lines, fmt.Sprintf("  %s  %s%s", prefix, t.Title, dueStr))
@@ -77,11 +79,6 @@ var todayCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-func startOfDay(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
 func init() { rootCmd.AddCommand(todayCmd) }

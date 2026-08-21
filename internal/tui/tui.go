@@ -16,6 +16,7 @@ import (
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/uistate"
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/dateutil"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/nlpdate"
 	"github.com/aeon022/taskctl/internal/reminders"
@@ -1262,9 +1263,9 @@ func (m Model) renderList() string {
 		if t.DueDate != nil {
 			now := time.Now()
 			switch {
-			case t.DueDate.Before(startOfDay(now)):
+			case t.DueDate.Before(dateutil.StartOfDay(now)):
 				due = "  " + styleOverdue.Render("overdue "+t.DueDate.Format("Jan 02"))
-			case !t.DueDate.After(endOfDay(now)):
+			case !t.DueDate.After(dateutil.EndOfDay(now)):
 				due = "  " + styleToday.Render("due today")
 			default:
 				due = "  " + styleDue.Render("due "+t.DueDate.Format("Mon Jan 02"))
@@ -1931,7 +1932,7 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 
 		if editTarget != nil {
 			_ = s.DeleteByID(ctx, editTarget.ID)
-			go providerDelete(editTarget)
+			go func() { _ = reminders.DeleteTask(editTarget) }()
 		}
 
 		// if a same-named task was previously deleted, clear the guard
@@ -1939,7 +1940,7 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 		// write to local cache immediately → instant UI response
 		_ = s.UpsertTask(ctx, t)
 		// sync to backend provider in background
-		go providerCreate(t)
+		go func() { _ = reminders.CreateTask(t) }()
 
 		return taskSavedMsg{}
 	}
@@ -1990,17 +1991,6 @@ func firstURL(s string) string {
 	return url
 }
 
-func providerDelete(t *models.Task)                      { _ = reminders.DeleteTask(t) }
-func providerCreate(t *models.Task)                      { _ = reminders.CreateTask(t) }
-func providerPostpone(t *models.Task, d time.Time) error { return reminders.PostponeTask(t, d) }
-func providerToggle(t *models.Task, wantDone bool) {
-	if wantDone {
-		_ = reminders.CompleteTask(t)
-	} else {
-		_ = reminders.UncompleteTask(t)
-	}
-}
-
 func deleteTaskCmd(t *models.Task) tea.Cmd {
 	taskCopy := *t
 	return func() tea.Msg {
@@ -2012,7 +2002,7 @@ func deleteTaskCmd(t *models.Task) tea.Cmd {
 			// guard: sync must not re-add this task even if backend delete is slow
 			_ = s.AddPendingDelete(ctx, &taskCopy)
 		}
-		go providerDelete(&taskCopy)
+		go func() { _ = reminders.DeleteTask(&taskCopy) }()
 		return taskDeletedMsg{task: &taskCopy}
 	}
 }
@@ -2034,7 +2024,11 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 
 		// backend update in background — don't block the UI
 		go func() {
-			providerToggle(&taskCopy, wantDone)
+			if wantDone {
+				_ = reminders.CompleteTask(&taskCopy)
+			} else {
+				_ = reminders.UncompleteTask(&taskCopy)
+			}
 			// clear guard once backend confirmed the change
 			if s2, err := store.New(config.DBPath(), config.Shared()); err == nil {
 				_ = s2.ClearPendingStatus(context.Background(), taskCopy.Title, taskCopy.List)
@@ -2059,7 +2053,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 			d := taskCopy.SpawnDate()
 			spawn.DueDate = &d
 			_ = s.UpsertTask(ctx, spawn)
-			go providerCreate(spawn)
+			go func() { _ = reminders.CreateTask(spawn) }()
 		}
 		return toggleDonedMsg{}
 	}
@@ -2068,7 +2062,7 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 func postponeCmd(t *models.Task, newDue time.Time) tea.Cmd {
 	taskCopy := *t
 	return func() tea.Msg {
-		if err := providerPostpone(&taskCopy, newDue); err != nil {
+		if err := reminders.PostponeTask(&taskCopy, newDue); err != nil {
 			return postponeMsg{err}
 		}
 		s, err := store.New(config.DBPath(), config.Shared())
@@ -2093,7 +2087,7 @@ func undoDeleteCmd(t *models.Task) tea.Cmd {
 		defer s.Close()
 		_ = s.ClearPendingDelete(context.Background(), t.Title, t.List)
 		_ = s.UpsertTask(context.Background(), t)
-		go providerCreate(t)
+		go func() { _ = reminders.CreateTask(t) }()
 		return taskSavedMsg{}
 	}
 }
@@ -2127,7 +2121,7 @@ func batchCompleteCmd(tasks []*models.Task) tea.Cmd {
 		now := time.Now()
 		for _, t := range tasks {
 			tc := t
-			go providerToggle(tc, true)
+			go func() { _ = reminders.CompleteTask(tc) }()
 			t.Status = "completed"
 			t.CompletedAt = &now
 			_ = s.UpsertTask(ctx, t)
@@ -2153,7 +2147,7 @@ func batchDeleteCmd(tasks []*models.Task) tea.Cmd {
 				_ = s.DeleteByID(ctx, copies[i].ID)
 				_ = s.AddPendingDelete(ctx, &copies[i])
 			}
-			go providerDelete(&copies[i])
+			go func() { _ = reminders.DeleteTask(&copies[i]) }()
 		}
 		return batchDeletedMsg{count: len(copies)}
 	}
@@ -2217,8 +2211,8 @@ func (m Model) searchQuery() string {
 // list-grouped order is preserved.
 func buildRows(tasks []models.Task, query string, filter listFilterMode) []row {
 	now := time.Now()
-	eod := endOfDay(now)
-	sod := startOfDay(now)
+	eod := dateutil.EndOfDay(now)
+	sod := dateutil.StartOfDay(now)
 
 	var titleMatch map[int]bool
 	if query != "" {
@@ -2360,11 +2354,6 @@ func prefillForm(t *models.Task) [fCount]textinput.Model {
 	return inputs
 }
 
-func startOfDay(t time.Time) time.Time {
-	y, mo, d := t.Date()
-	return time.Date(y, mo, d, 0, 0, 0, 0, t.Location())
-}
-
 func loadCachedListEntriesCmd() tea.Cmd {
 	return func() tea.Msg {
 		s, err := store.New(config.DBPath(), config.Shared())
@@ -2403,11 +2392,6 @@ func uniqueListEntries(tasks []models.Task) []models.ListEntry {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
-}
-
-func endOfDay(t time.Time) time.Time {
-	y, mo, d := t.Date()
-	return time.Date(y, mo, d, 23, 59, 59, 0, t.Location())
 }
 
 // Run starts the TUI. openTaskID, if non-empty, pre-selects and opens that

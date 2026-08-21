@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/dateutil"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -25,7 +27,7 @@ var weekCmd = &cobra.Command{
 			return err
 		}
 
-		mon, sun := weekRange()
+		mon, sun := dateutil.WeekRange(time.Now())
 		curList := ""
 
 		if isJSON() {
@@ -55,7 +57,7 @@ var weekCmd = &cobra.Command{
 				}
 				curList = t.List
 				fmt.Println(t.List)
-				fmt.Println(repeat("─", len(t.List)+2))
+				fmt.Println(strings.Repeat("─", len(t.List)+2))
 			}
 			due := ""
 			if t.DueDate != nil {
@@ -68,19 +70,6 @@ var weekCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-func weekRange() (time.Time, time.Time) {
-	now := time.Now()
-	wd := int(now.Weekday())
-	if wd == 0 {
-		wd = 7
-	}
-	mon := now.AddDate(0, 0, -(wd - 1))
-	mon = time.Date(mon.Year(), mon.Month(), mon.Day(), 0, 0, 0, 0, time.Local)
-	sun := mon.AddDate(0, 0, 6)
-	sun = time.Date(sun.Year(), sun.Month(), sun.Day(), 23, 59, 59, 0, time.Local)
-	return mon, sun
 }
 
 func init() { rootCmd.AddCommand(weekCmd) }

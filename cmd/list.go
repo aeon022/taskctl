@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aeon022/taskctl/internal/config"
+	"github.com/aeon022/taskctl/internal/dateutil"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +49,7 @@ var listCmd = &cobra.Command{
 			today := time.Now()
 			filtered := tasks[:0]
 			for _, t := range tasks {
-				if t.DueDate != nil && !t.DueDate.After(endOfDay(today)) {
+				if t.DueDate != nil && !t.DueDate.After(dateutil.EndOfDay(today)) {
 					filtered = append(filtered, t)
 				}
 			}
@@ -76,7 +78,7 @@ var listCmd = &cobra.Command{
 					fmt.Println()
 				}
 				curList = t.List
-				fmt.Printf("%s\n%s\n", curList, repeat("─", len(curList)+2))
+				fmt.Printf("%s\n%s\n", curList, strings.Repeat("─", len(curList)+2))
 			}
 			mark := "○"
 			if t.Done() {
@@ -97,17 +99,4 @@ func init() {
 	listCmd.Flags().BoolVar(&listAll, "all", false, "Include completed tasks")
 	listCmd.Flags().BoolVar(&listToday, "today", false, "Only tasks due today or overdue")
 	rootCmd.AddCommand(listCmd)
-}
-
-func endOfDay(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 23, 59, 59, 0, t.Location())
-}
-
-func repeat(s string, n int) string {
-	out := ""
-	for range n {
-		out += s
-	}
-	return out
 }
