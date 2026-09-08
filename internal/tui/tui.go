@@ -1202,7 +1202,17 @@ func (m Model) renderList() string {
 	}
 
 	visible, start := m.visibleRowsWithStart(listHeight)
+	// visibleRowsWithStart windows by row COUNT, but a section header costs
+	// 2-3 physical lines (blank + label + rule) against a budget sized in
+	// row units — with several list groups on screen that mismatch renders
+	// more physical lines than listHeight allows, scrolling the terminal
+	// and pushing the app header (printed above this loop) off the top.
+	// Stop hard at the real line budget rather than trusting the row-count
+	// window alone (same fix as calctl's renderList).
 	for localI, r := range visible {
+		if linesWritten >= listHeight {
+			break
+		}
 		i := start + localI
 		if r.isHeader {
 			if i > 0 {
