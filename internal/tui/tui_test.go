@@ -216,3 +216,27 @@ func TestHighlightMatches_NoMatchRendersPlain(t *testing.T) {
 		t.Errorf("expected nil idxs to render plain, got %q want %q", out, styleTitle.Render("hello"))
 	}
 }
+
+// Regression: in Bubble Tea v2 a space key press stringifies as "space", not
+// " " — a leftover `case " "` silently never matched. This drives a real v2
+// space press through Update. The returned Cmd (which would write to the real
+// DB) is deliberately never executed.
+func TestSpaceKey_TogglesDoneOnCursorTask(t *testing.T) {
+	m := newModel("")
+	m.width, m.height = 100, 30
+	m.tasks = []models.Task{{ID: "1", Title: "write docs", List: "Work", Status: "needsAction"}}
+	m.rows = buildRows(m.tasks, "", filterNone)
+	m.cursor = firstTaskRow(m.rows)
+	if cursorTask(m) == nil {
+		t.Fatal("setup: cursor is not on a task row")
+	}
+
+	mi, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = mi.(Model)
+	if got := cursorTask(m); got == nil || !got.Done() {
+		t.Fatalf("space did not mark the cursor task done: %+v", got)
+	}
+	if cmd == nil {
+		t.Error("expected a persist command after toggling")
+	}
+}
