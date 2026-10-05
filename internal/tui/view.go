@@ -9,10 +9,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/dateutil"
+	"github.com/aeon022/missionctl-core/emptystate"
 	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/palette"
+	"github.com/aeon022/missionctl-core/statusbar"
 	"github.com/aeon022/missionctl-core/theme"
 )
 
@@ -28,7 +30,7 @@ func (m Model) View() tea.View {
 
 func (m Model) viewContent() string {
 	if m.loading {
-		return "\n  " + m.sp.View() + styleSubhead.Render(" Loading tasks…") + "\n"
+		return emptystate.Loading(m.width, m.height, m.sp.View(), "Loading tasks…")
 	}
 	m.width -= appPadH * 2
 	m.height -= appPadV * 2
@@ -45,7 +47,7 @@ func (m Model) viewContent() string {
 		// "?" is only reachable from the main list, so the list is always
 		// the correct background to keep visible behind the popup. No
 		// enclosing border on the list view, so inset 0 is safe.
-		content = overlay.Center(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
+		content = overlay.CenterDim(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
 	case viewDetail:
 		content = overlay.Center(m.renderList(), m.renderDetailPopup(), m.width, m.height, 0)
 	default:
@@ -151,29 +153,23 @@ func (m Model) renderList() string {
 
 	linesWritten := 0
 	if len(m.rows) == 0 {
-		var msg string
+		var title, hint string
 		switch {
 		case m.searchQuery() != "":
-			msg = "No tasks match your search."
+			title = "No tasks match your search"
 		case m.filter == filterFocus:
-			msg = "No tasks due today or overdue — press t to show all tasks."
+			title, hint = "No tasks due today or overdue", "press t to show all tasks"
 		case m.filter == filterOverdue:
-			msg = "No overdue tasks — press O to show all tasks."
+			title, hint = "No overdue tasks", "press O to show all tasks"
 		case len(m.tasks) == 0:
-			msg = "No tasks yet — press n to add one, or s to sync with Apple Reminders."
+			title, hint = "No tasks yet", "press n to add one, or s to sync with Apple Reminders"
 		default:
-			msg = "No tasks found."
+			title = "No tasks found"
 		}
-		// Vertically center in the space the footer's fixed-bottom padding
-		// (below) leaves available, instead of sitting flush at the top
-		// with a dead void beneath it.
-		for topPad := max(0, (listHeight-1)/2); topPad > 0; topPad-- {
-			b.WriteString("\n")
-			linesWritten++
-		}
-		centered := lipgloss.NewStyle().Width(max(0, m.width)).Align(lipgloss.Center).Render(styleSubhead.Render(msg))
-		b.WriteString(centered + "\n")
-		linesWritten++
+		// Centered in the space the fixed-bottom footer leaves available.
+		block := emptystate.Render(m.width, max(listHeight, 1), "", title, hint)
+		b.WriteString(block + "\n")
+		linesWritten += lipgloss.Height(block)
 	}
 
 	visible, start := m.visibleRowsWithStart(listHeight)
@@ -529,47 +525,27 @@ func (m Model) renderDetailPopup() string {
 func (m Model) narrowFooter() bool { return m.width > 0 && m.width < 90 }
 
 func (m Model) renderStatusBar() string {
-	key := func(k string) string { return styleKey.Render(k) }
-	// keyed renders a (possibly multi-key, e.g. "↑/↓") hint in the
-	// suite-wide "key:label" format — only the key glyphs are styled, the
-	// colon is plain like every other tool's footer.
-	keyed := func(k string) string { return styleKey.Render(k) + ":" }
+	w := max(m.width-2, 0) // 2-column indent
+	row := func(pairs ...[2]string) string { return "  " + statusbar.Hints(w, pairs...) + "\n" }
 
 	if m.deleteTarget != nil {
 		return fmt.Sprintf("  Delete %q?  %sconfirm  any cancel\n",
-			m.deleteTarget.Title, keyed("y"))
+			m.deleteTarget.Title, styleKey.Render("y")+":")
 	}
 	if m.narrowFooter() {
-		return fmt.Sprintf("  %snav  %sdone  %snew  %ssearch  %shelp  %squit\n",
-			keyed("↑/↓"), keyed("space"), keyed("n"), keyed("/"), keyed("?"), keyed("q"))
+		return row([2]string{"↑/↓", "nav"}, [2]string{"space", "done"}, [2]string{"n", "new"},
+			[2]string{"/", "search"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
 	}
 	doneLabel := "show done"
 	if m.showDone {
 		doneLabel = "hide done"
 	}
-	line1 := fmt.Sprintf(
-		"  %snav  %sdone  %sdetails  %snew/edit/delete  %sopen url  %spostpone",
-		keyed("↑/↓"),
-		keyed("space"),
-		keyed("enter"),
-		keyed("n/e/d"),
-		keyed("o"),
-		keyed("S"),
-	)
-	line2 := fmt.Sprintf(
-		"  %sundo  %spomo  %sselect  %sfocus  %ssearch  %sstats  %ssync  %s%s  %shelp  %squit",
-		keyed("u"),
-		keyed("p"),
-		keyed("v"),
-		keyed("t"),
-		keyed("/"),
-		keyed("i"),
-		keyed("s"),
-		key("c"), ":"+doneLabel,
-		keyed("?"),
-		keyed("q"),
-	)
-	return line1 + "\n" + line2 + "\n"
+	line1 := row([2]string{"↑/↓", "nav"}, [2]string{"space", "done"}, [2]string{"enter", "details"},
+		[2]string{"n/e/d", "new/edit/delete"}, [2]string{"o", "open url"}, [2]string{"S", "postpone"})
+	line2 := row([2]string{"u", "undo"}, [2]string{"p", "pomo"}, [2]string{"v", "select"}, [2]string{"t", "focus"},
+		[2]string{"/", "search"}, [2]string{"i", "stats"}, [2]string{"s", "sync"}, [2]string{"c", doneLabel},
+		[2]string{"?", "help"}, [2]string{"q", "quit"})
+	return line1 + line2
 }
 
 func (m Model) statusBarHeight() int {
