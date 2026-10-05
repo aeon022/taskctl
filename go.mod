@@ -3,7 +3,7 @@ module github.com/aeon022/taskctl
 go 1.26.5
 
 require (
-	github.com/aeon022/missionctl-core v0.0.0-20260821141714-32739ffedc1f
+	github.com/aeon022/missionctl-core v0.0.0-20261005114642-5936b006965e
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
