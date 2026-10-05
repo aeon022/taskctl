@@ -260,14 +260,17 @@ func newModel(openTaskID string) Model {
 	si := textinput.New()
 	si.Placeholder = "search…"
 	si.CharLimit = 80
+	si.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	pi := textinput.New()
 	pi.Placeholder = "command…"
 	pi.CharLimit = 40
+	pi.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	sti := textinput.New()
 	sti.Placeholder = "Subtask title…"
 	sti.CharLimit = 200
+	sti.SetWidth(40) // v2: width 0 clips the placeholder to 1 char
 
 	var state persistedState
 	uistate.Load(config.UIStatePath(), &state)
@@ -618,7 +621,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			if m.subtaskCursor > 0 {
 				m.subtaskCursor--
 			}
-		case " ":
+		case "space":
 			if t != nil && m.subtaskCursor < len(t.Subtasks) {
 				t.Subtasks[m.subtaskCursor].Done = !t.Subtasks[m.subtaskCursor].Done
 				return m, persistSubtaskEditCmd(t)
@@ -824,7 +827,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 					m.cursor++
 				}
 			}
-		case " ":
+		case "space":
 			if t := cursorTask(m); t != nil {
 				if m.selected[t.ID] {
 					delete(m.selected, t.ID)
@@ -944,7 +947,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case " ":
+	case "space":
 		if t := cursorTask(m); t != nil {
 			if t.Done() {
 				t.Status = "needsAction"
@@ -2356,6 +2359,7 @@ func newFormInputs(defaultList string) [fCount]textinput.Model {
 		t := textinput.New()
 		t.Placeholder = placeholders[i]
 		t.CharLimit = 200
+		t.SetWidth(60) // v2: width 0 clips the placeholder to 1 char
 		inputs[i] = t
 	}
 	if defaultList != "" {
