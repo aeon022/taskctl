@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.55.1
 	github.com/muesli/termenv v0.16.0
-	github.com/sahilm/fuzzy v0.1.1
+	github.com/sahilm/fuzzy v0.1.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	modernc.org/sqlite v1.55.0
