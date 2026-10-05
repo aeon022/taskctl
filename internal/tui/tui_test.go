@@ -1,28 +1,27 @@
 package tui
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/aeon022/missionctl-core/palette"
 	"github.com/aeon022/taskctl/internal/models"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 )
 
 func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
 	m := newModel("")
 	m.width, m.height = 100, 30
 
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: ":", Code: []rune(":")[0]})
 	m = mi.(Model)
 	if !m.inPalette {
 		t.Fatal("expected inPalette after ':'")
 	}
 
 	for _, r := range "new" {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mi, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
 		m = mi.(Model)
 	}
 	matches := palette.Match(paletteCommands, m.paletteInput.Value())
@@ -30,7 +29,7 @@ func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
 		t.Fatalf("expected 'new' to be the top match for query %q, got %v", m.paletteInput.Value(), matches)
 	}
 
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = mi.(Model)
 	if m.inPalette {
 		t.Error("expected palette to close after executing a command")
@@ -43,10 +42,10 @@ func TestCommandPalette_TypeFilterAndExecute(t *testing.T) {
 func TestCommandPalette_EscCloses(t *testing.T) {
 	m := newModel("")
 	m.width, m.height = 100, 30
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: ":", Code: []rune(":")[0]})
 	m = mi.(Model)
 
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = mi.(Model)
 	if m.inPalette {
 		t.Error("expected esc to close the palette")
@@ -56,7 +55,7 @@ func TestCommandPalette_EscCloses(t *testing.T) {
 func TestHelpOverlay_OpenScrollClose(t *testing.T) {
 	m := Model{width: 100, height: 30}
 
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "?", Code: []rune("?")[0]})
 	m = mi.(Model)
 	if m.view != viewHelp {
 		t.Fatalf("expected viewHelp after '?', got %v", m.view)
@@ -67,14 +66,14 @@ func TestHelpOverlay_OpenScrollClose(t *testing.T) {
 
 	before := m.helpVP.ScrollPercent()
 	for i := 0; i < 5; i++ {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		mi, _ = m.Update(tea.KeyPressMsg{Text: "j", Code: []rune("j")[0]})
 		m = mi.(Model)
 	}
 	if m.helpVP.ScrollPercent() <= before {
 		t.Errorf("expected scroll to advance after pressing j, stayed at %v", before)
 	}
 
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = mi.(Model)
 	if m.view != viewList {
 		t.Errorf("expected esc to close help back to viewList, got %v", m.view)
@@ -98,11 +97,11 @@ func TestHelpOverlay_PopupBorderColumnIsConsistent(t *testing.T) {
 	m := Model{width: 100, height: 30}
 	m = m.openHelp()
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.viewContent(), "\n")
 	col := -1
 	for i, l := range lines {
 		idx := -1
-		for j, r := range []rune(l) {
+		for j, r := range []rune(ansi.Strip(l)) {
 			if r == '╭' || r == '│' || r == '╰' {
 				idx = j
 				break
@@ -200,8 +199,6 @@ func TestBuildRows_EmptyQueryReturnsAllUnfiltered(t *testing.T) {
 }
 
 func TestHighlightMatches_ColorsOnlyMatchedRunes(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	idxs := fuzzyMatchIndexes("bgt", "budgetctl")
 	if idxs == nil {

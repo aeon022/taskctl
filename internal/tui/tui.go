@@ -8,6 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/dateutil"
 	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/keymap"
@@ -21,11 +26,6 @@ import (
 	"github.com/aeon022/taskctl/internal/nlpdate"
 	"github.com/aeon022/taskctl/internal/reminders"
 	"github.com/aeon022/taskctl/internal/store"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/sahilm/fuzzy"
 )
@@ -114,12 +114,12 @@ const flashDuration = 2 * time.Second
 
 var (
 	// Shared across the suite via missionctl-core/theme.
-	colorBlue   = theme.Blue
-	colorGreen  = theme.Green
-	colorRed    = theme.Red
-	colorAmber  = theme.Amber
-	colorMuted  = theme.Muted
-	colorSubtle = theme.Subtle
+	colorBlue   = theme.BlueV2
+	colorGreen  = theme.GreenV2
+	colorRed    = theme.RedV2
+	colorAmber  = theme.AmberV2
+	colorMuted  = theme.MutedV2
+	colorSubtle = theme.SubtleV2
 
 	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	styleSubhead = lipgloss.NewStyle().Foreground(colorMuted)
@@ -130,8 +130,8 @@ var (
 	styleToday   = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
 	styleOverdue = lipgloss.NewStyle().Foreground(colorRed)
 	styleCursor  = lipgloss.NewStyle().
-			Background(theme.SelectedBg).
-			Foreground(theme.SelectedFg).
+			Background(theme.SelectedBgV2).
+			Foreground(theme.SelectedFgV2).
 			Bold(true)
 	styleKey         = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
 	styleLabel       = lipgloss.NewStyle().Foreground(colorMuted).Width(formLabelWidth)
@@ -143,9 +143,9 @@ var (
 	styleUrgent      = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	styleImportant   = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 	styleSelected    = lipgloss.NewStyle().Foreground(colorGreen)
-	styleFocusBadge  = lipgloss.NewStyle().Background(colorRed).Foreground(theme.SelectedFg).Padding(0, 1)
-	styleCountBadge  = lipgloss.NewStyle().Foreground(colorMuted).Background(theme.HoverBg).Padding(0, 1)
-	styleTitleBar    = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectedFg).Background(colorBlue)
+	styleFocusBadge  = lipgloss.NewStyle().Background(colorRed).Foreground(theme.SelectedFgV2).Padding(0, 1)
+	styleCountBadge  = lipgloss.NewStyle().Foreground(colorMuted).Background(theme.HoverBgV2).Padding(0, 1)
+	styleTitleBar    = lipgloss.NewStyle().Bold(true).Foreground(theme.SelectedFgV2).Background(colorBlue)
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -462,26 +462,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tick()
 		}
 
-	case tea.MouseMsg:
+	case tea.MouseWheelMsg:
 		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+		case tea.MouseWheelUp:
 			if m.cursor > 0 {
 				m.cursor--
 				if m.cursor < len(m.rows) && m.rows[m.cursor].isHeader && m.cursor > 0 {
 					m.cursor--
 				}
 			}
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			if m.cursor < len(m.rows)-1 {
 				m.cursor++
 				if m.cursor < len(m.rows) && m.rows[m.cursor].isHeader && m.cursor < len(m.rows)-1 {
 					m.cursor++
 				}
 			}
-		case tea.MouseButtonLeft:
-			if msg.Action != tea.MouseActionPress || m.view != viewList {
-				return m, nil
-			}
+		}
+		return m, nil
+
+	case tea.MouseClickMsg:
+		if m.view != viewList {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseLeft:
 			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 {
 				now := time.Now()
 				if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
@@ -498,10 +503,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastClickRow = i
 				m.lastClickAt = now
 			}
-		case tea.MouseButtonRight:
-			if msg.Action != tea.MouseActionPress || m.view != viewList {
-				return m, nil
-			}
+		case tea.MouseRight:
 			// Toggle done on whatever row was clicked, not the cursor row —
 			// a quick-action shouldn't require selecting first.
 			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 {
@@ -518,10 +520,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, toggleDoneCmd(t)
 				}
 			}
-		case tea.MouseButtonNone:
-			if msg.Action == tea.MouseActionMotion && m.view == viewList {
-				m.hoverRow = m.rowHitTest(msg.Y - appPadV)
-			}
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if m.view == viewList {
+			m.hoverRow = m.rowHitTest(msg.Y - appPadV)
 		}
 		return m, nil
 
@@ -533,13 +537,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	// ── pomodoro view ─────────────────────────────────────────────────────
 	if m.view == viewPomodoro {
 		switch msg.String() {
@@ -755,11 +759,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			chosen := matches[m.paletteCursor]
 			m = closePalette(m)
-			replay := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(chosen.Key)}
+			replay := tea.KeyPressMsg{Text: chosen.Key, Code: []rune(chosen.Key)[0]}
 			if chosen.Key == "enter" {
-				replay = tea.KeyMsg{Type: tea.KeyEnter}
+				replay = tea.KeyPressMsg{Code: tea.KeyEnter}
 			} else if chosen.Key == " " {
-				replay = tea.KeyMsg{Type: tea.KeySpace}
+				replay = tea.KeyPressMsg{Text: " ", Code: tea.KeySpace}
 			}
 			newM, cmd := m.Update(replay)
 			return newM.(Model), cmd
@@ -1051,7 +1055,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // tea.MouseMsg case in Update.
 const appPadV, appPadH = 1, 2
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	// v1's tea.WithAltScreen()/WithMouseAllMotion() Program options are gone
+	// in v2 — they are per-View fields now.
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeAllMotion
+	return v
+}
+
+func (m Model) viewContent() string {
 	if m.loading {
 		return "\n  " + m.sp.View() + styleSubhead.Render(" Loading tasks…") + "\n"
 	}
@@ -1304,7 +1317,7 @@ func (m Model) renderList() string {
 			prefix = barStyle.Render("▎")
 			row = prefix + styleCursor.Render(row)
 		case i == m.hoverRow:
-			row = prefix + theme.Hover.Render(row)
+			row = prefix + theme.HoverV2.Render(row)
 		default:
 			row = prefix + row
 		}
@@ -1442,7 +1455,7 @@ func (m Model) openHelp() Model {
 		popW = 40
 	}
 
-	vp := viewport.New(popW-6, popH-6) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for title bar, -1 for footer
+	vp := viewport.New(viewport.WithWidth(popW-6), viewport.WithHeight(popH-6)) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for title bar, -1 for footer
 	vp.SetContent(m.helpContent())
 
 	m.helpVP = vp
@@ -1457,7 +1470,7 @@ func (m Model) openHelp() Model {
 // the whole screen — the list stays visible around it.
 func (m Model) renderHelpPopup() string {
 	footer := "esc / ?  close"
-	if m.helpVP.TotalLineCount() > m.helpVP.Height {
+	if m.helpVP.TotalLineCount() > m.helpVP.Height() {
 		footer = fmt.Sprintf("j/k scroll (%d%%)  ·  %s", int(m.helpVP.ScrollPercent()*100), footer)
 	}
 	titleBar := styleTitleBar.Width(max(0, m.helpPopW-6)).Render(" Help")
@@ -2404,11 +2417,29 @@ func uniqueListEntries(tasks []models.Task) []models.ListEntry {
 	return out
 }
 
+// motionThrottleFilter drops MouseMotionMsg messages arriving <16ms apart.
+func motionThrottleFilter() func(tea.Model, tea.Msg) tea.Msg {
+	var lastMotion time.Time
+	return func(_ tea.Model, msg tea.Msg) tea.Msg {
+		if _, ok := msg.(tea.MouseMotionMsg); !ok {
+			return msg
+		}
+		now := time.Now()
+		if now.Sub(lastMotion) < 16*time.Millisecond {
+			return nil
+		}
+		lastMotion = now
+		return msg
+	}
+}
+
 // Run starts the TUI. openTaskID, if non-empty, pre-selects and opens that
 // task's detail popup as soon as tasks finish loading — used by `taskctl
 // --task <id>` to jump in directly from another tool's linked entry.
 func Run(openTaskID string) error {
-	p := tea.NewProgram(newModel(openTaskID), tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithFPS(30))
+	// WithFPS(30) + motionThrottleFilter: all-motion mouse mode re-renders on every
+	// pixel of movement, which at 60fps can overwhelm the terminal.
+	p := tea.NewProgram(newModel(openTaskID), tea.WithFilter(motionThrottleFilter()), tea.WithFPS(30))
 	_, err := p.Run()
 	return err
 }
