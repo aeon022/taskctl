@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aeon022/taskctl/internal/config"
 	"github.com/aeon022/missionctl-core/dateutil"
+	"github.com/aeon022/taskctl/internal/config"
 	"github.com/aeon022/taskctl/internal/store"
 	"github.com/spf13/cobra"
 )
 
 var (
-	listList     string
-	listAll      bool
-	listToday    bool
+	listList  string
+	listAll   bool
+	listToday bool
 )
 
 var listCmd = &cobra.Command{

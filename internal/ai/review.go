@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aeon022/taskctl/internal/models"
 	coreai "github.com/aeon022/missionctl-core/ai"
+	"github.com/aeon022/taskctl/internal/models"
 )
 
 // FollowUp is one AI-suggested follow-up task.
