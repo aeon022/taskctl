@@ -2,6 +2,7 @@ package reminders
 
 import (
 	"fmt"
+	"github.com/aeon022/missionctl-core/applescript"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,7 +145,7 @@ tell application "Reminders"
 	end repeat
 	return output
 end tell`
-	out, err := runAppleScript(script)
+	out, err := applescript.Run(script)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +297,7 @@ func createViaAppleScript(t *models.Task) error {
 	}
 	notesLine := ""
 	if t.Notes != "" {
-		notesLine = fmt.Sprintf(`set body of newTask to "%s"`, escapeAS(t.Notes))
+		notesLine = fmt.Sprintf(`set body of newTask to "%s"`, applescript.Escape(t.Notes))
 	}
 	prioLine := ""
 	if t.Priority > 0 {
@@ -314,8 +315,8 @@ tell application "Reminders"
 	%s
 	%s
 end tell
-`, escapeAS(listName), escapeAS(t.Title), dueLine, notesLine, prioLine)
-	_, err := runAppleScript(script)
+`, applescript.Escape(listName), applescript.Escape(t.Title), dueLine, notesLine, prioLine)
+	_, err := applescript.Run(script)
 	return err
 }
 
@@ -338,8 +339,8 @@ tell application "Reminders"
 		end try
 	end repeat
 end tell
-`, escapeAS(listName), escapeAS(t.Title))
-	_, err := runAppleScript(script)
+`, applescript.Escape(listName), applescript.Escape(t.Title))
+	_, err := applescript.Run(script)
 	return err
 }
 
@@ -362,8 +363,8 @@ tell application "Reminders"
 		end try
 	end repeat
 end tell
-`, escapeAS(listName), escapeAS(t.Title))
-	_, err := runAppleScript(script)
+`, applescript.Escape(listName), applescript.Escape(t.Title))
+	_, err := applescript.Run(script)
 	return err
 }
 
@@ -388,8 +389,8 @@ tell application "Reminders"
 		end try
 	end repeat
 end tell
-`, iso, escapeAS(listName), escapeAS(t.Title))
-	_, err := runAppleScript(script)
+`, iso, applescript.Escape(listName), applescript.Escape(t.Title))
+	_, err := applescript.Run(script)
 	return err
 }
 
@@ -420,8 +421,8 @@ tell application "Reminders"
 	end repeat
 end tell
 return wasDeleted as string
-`, escapeAS(listName), escapeAS(t.Title))
-	out, err := runAppleScript(script)
+`, applescript.Escape(listName), applescript.Escape(t.Title))
+	out, err := applescript.Run(script)
 	if err != nil {
 		return err
 	}
@@ -435,7 +436,7 @@ func fetchViaAppleScript(listName string) ([]models.Task, error) {
 	listFilter := ""
 	if listName != "" {
 		listFilter = fmt.Sprintf(`set theList to list "%s"
-		set allReminders to reminders of theList`, escapeAS(listName))
+		set allReminders to reminders of theList`, applescript.Escape(listName))
 	} else {
 		listFilter = `set allReminders to {}
 		repeat with a in accounts
@@ -473,7 +474,7 @@ tell application "Reminders"
 	return output
 end tell
 `, listFilter)
-	out, err := runAppleScript(script)
+	out, err := applescript.Run(script)
 	if err != nil {
 		return nil, fmt.Errorf("applescript: %w", err)
 	}
@@ -550,7 +551,7 @@ func parseTasks(raw string) []models.Task {
 
 func DefaultList() string {
 	script := `tell application "Reminders" to return name of default list`
-	out, err := runAppleScript(script)
+	out, err := applescript.Run(script)
 	if err != nil || strings.TrimSpace(out) == "" {
 		return "Reminders"
 	}
@@ -575,24 +576,6 @@ func NotifyDueTasks(tasks []models.Task) {
 		msg += "…"
 	}
 	script := fmt.Sprintf(`display notification "%s" with title "taskctl — Due Today" sound name "Ping"`,
-		escapeAS(msg))
+		applescript.Escape(msg))
 	_ = exec.Command("osascript", "-e", script).Run()
-}
-
-func runAppleScript(script string) (string, error) {
-	cmd := exec.Command("osascript", "-e", script)
-	out, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("osascript: %s", string(exitErr.Stderr))
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func escapeAS(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return s
 }
