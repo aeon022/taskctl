@@ -29,6 +29,13 @@ func loadLastSyncedCmd() tea.Cmd {
 	}
 }
 
+// browsing reports whether the user is just looking at the list: no form,
+// popup, search, palette, confirm or batch selection, and nothing in flight.
+func (m Model) browsing() bool {
+	return m.view == viewList && !m.loading && !m.syncing && !m.focusLoading &&
+		!m.searching && !m.inPalette && !m.selecting && m.deleteTarget == nil && !m.addingSubtask
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -42,11 +49,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = 1
 		}
 
+	case tea.FocusMsg:
+		// Back from another window: reload stale data, but only while just
+		// browsing — never under a form, search, palette, confirm or popup.
+		if m.browsing() && time.Since(m.lastLoad) > 5*time.Second {
+			m.focusLoading = true
+			return m, loadTasks(m.showDone)
+		}
+		return m, nil
+
 	case tasksLoadedMsg:
+		keepID := ""
+		if m.focusLoading && m.cursor >= 0 && m.cursor < len(m.rows) && m.rows[m.cursor].task != nil {
+			keepID = m.rows[m.cursor].task.ID
+		}
+		m.focusLoading = false
+		m.lastLoad = time.Now()
 		m.tasks = msg.tasks
 		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
 		m.loading = false
 		m.cursor = firstTaskRow(m.rows)
+		for i, r := range m.rows {
+			if keepID != "" && r.task != nil && r.task.ID == keepID {
+				m.cursor = i
+				break
+			}
+		}
 		// pre-populate list entries from loaded tasks so picker works immediately
 		if len(m.listEntries) == 0 {
 			m.listEntries = uniqueListEntries(m.tasks)

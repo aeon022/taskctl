@@ -22,6 +22,7 @@ func (m Model) View() tea.View {
 	// in v2 — they are per-View fields now.
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeAllMotion
+	v.ReportFocus = true // FocusMsg → reload stale tasks when the window regains focus
 	return v
 }
 

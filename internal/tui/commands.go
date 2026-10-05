@@ -33,15 +33,15 @@ func clearDeletedToastCmd(id string) tea.Cmd {
 	})
 }
 
-// copyToClipboardCmd shells out to pbcopy — same approach mailctl uses for
-// its "y" copy shortcut, no clipboard library dependency needed.
+// copyToClipboardCmd copies via OSC 52 (works over SSH/tmux) and also shells
+// out to pbcopy, which Terminal.app needs since it ignores OSC 52.
 func copyToClipboardCmd(text string) tea.Cmd {
-	return func() tea.Msg {
+	return tea.Batch(tea.SetClipboard(text), func() tea.Msg {
 		cmd := exec.Command("pbcopy")
 		cmd.Stdin = strings.NewReader(text)
 		_ = cmd.Run()
 		return nil
-	}
+	})
 }
 
 func clearFlashCmd(text string) tea.Cmd {
