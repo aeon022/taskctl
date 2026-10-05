@@ -1,15 +1,18 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
 	coreconfig "github.com/aeon022/missionctl-core/config"
-	"github.com/spf13/viper"
 )
 
+// settings is this tool's config store (replaces the former global viper).
+var settings = coreconfig.NewStore("config")
+
 type Config struct {
-	DefaultList string `mapstructure:"default_list"`
+	DefaultList string `yaml:"default_list"`
 }
 
 var Active Config
@@ -19,22 +22,19 @@ func Load() error {
 	cfgDir := filepath.Join(home, ".config", "taskctl")
 	_ = os.MkdirAll(cfgDir, 0755)
 
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(cfgDir)
-	viper.SetEnvPrefix("TASKCTL")
-	viper.AutomaticEnv()
+	settings.SetEnvPrefix("TASKCTL")
+	settings.AddPath(cfgDir)
 
-	viper.SetDefault("default_list", "")
+	settings.SetDefault("default_list", "")
 
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+	if err := settings.Read(); err != nil {
+		if !errors.Is(err, coreconfig.ErrNotFound) {
 			return err
 		}
 		// write defaults
-		_ = viper.WriteConfigAs(filepath.Join(cfgDir, "config.yaml"))
+		_ = settings.Write(filepath.Join(cfgDir, "config.yaml"))
 	}
-	return viper.Unmarshal(&Active)
+	return settings.Unmarshal(&Active)
 }
 
 // DBPathOverride, when non-empty, overrides DBPath()'s return value. Used by tests
@@ -42,7 +42,7 @@ func Load() error {
 var DBPathOverride string
 
 // DBPath returns the database file path. DBPathOverride (test-only) wins
-// if set; otherwise data_dir (viper key, also settable via
+// if set; otherwise data_dir (config key, also settable via
 // TASKCTL_DATA_DIR) points it at a user-chosen directory — e.g. inside
 // iCloud Drive or Dropbox — resolved via coreconfig.ResolveDir; with
 // neither set, the private default (~/Library/Application Support/taskctl)
@@ -51,7 +51,7 @@ func DBPath() string {
 	if DBPathOverride != "" {
 		return DBPathOverride
 	}
-	if dir := viper.GetString("data_dir"); dir != "" {
+	if dir := settings.GetString("data_dir"); dir != "" {
 		resolved, _ := coreconfig.ResolveDir("taskctl", dir)
 		return filepath.Join(resolved, "taskctl.db")
 	}
@@ -61,7 +61,7 @@ func DBPath() string {
 // Shared reports whether DBPath currently resolves to a user-configured
 // directory (data_dir) rather than the tool's private default.
 func Shared() bool {
-	return DBPathOverride == "" && viper.GetString("data_dir") != ""
+	return DBPathOverride == "" && settings.GetString("data_dir") != ""
 }
 
 // UIStatePath is where the TUI persists small preferences (last active
