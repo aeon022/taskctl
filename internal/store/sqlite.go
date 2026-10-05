@@ -211,23 +211,6 @@ func (s *Store) ListTasks(ctx context.Context, f ListFilter) ([]models.Task, err
 	return scanTasks(rows)
 }
 
-func (s *Store) ListNames(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT list FROM tasks ORDER BY list`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var names []string
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			return nil, err
-		}
-		names = append(names, n)
-	}
-	return names, rows.Err()
-}
-
 func (s *Store) UpdateDueDate(ctx context.Context, id string, due *time.Time) error {
 	var v *string
 	if due != nil {
@@ -343,17 +326,6 @@ func (s *Store) GetListEntries(ctx context.Context) ([]models.ListEntry, error) 
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
-}
-
-// ProviderForList returns the provider ("apple" | "google") for a given list name.
-func (s *Store) ProviderForList(ctx context.Context, listName string) string {
-	var p string
-	_ = s.db.QueryRowContext(ctx,
-		`SELECT provider FROM lists WHERE name=? LIMIT 1`, listName).Scan(&p)
-	if p == "" {
-		return "apple"
-	}
-	return p
 }
 
 func (s *Store) AddPendingDelete(ctx context.Context, t *models.Task) error {
