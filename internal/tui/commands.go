@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -119,45 +120,54 @@ func syncCmd() tea.Cmd {
 	}
 }
 
+// taskFromForm builds the task a submitted form describes. When editing, the
+// original's local-only subtasks carry over (the edit path replaces the row
+// under a fresh ID, so anything not copied here is lost).
+func taskFromForm(inputs [fCount]textinput.Model, editTarget *models.Task) (*models.Task, error) {
+	rawTitle := strings.TrimSpace(inputs[fTitle].Value())
+	if rawTitle == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+	title, priority := parsePriority(rawTitle)
+	listName := strings.TrimSpace(inputs[fList].Value())
+	if listName == "" {
+		// Resolve to the same list CreateTask would fall back to, so the
+		// local echo and the Apple-side reminder always agree — otherwise
+		// the local row stays "" forever while Apple creates it under its
+		// real default list, leaving a permanent phantom duplicate.
+		listName = reminders.DefaultList()
+	}
+	t := &models.Task{
+		ID:         "taskctl-" + uuid.New().String(),
+		Title:      title,
+		Priority:   priority,
+		List:       listName,
+		Notes:      strings.TrimSpace(inputs[fNotes].Value()),
+		URL:        strings.TrimSpace(inputs[fURL].Value()),
+		Recurrence: strings.ToLower(strings.TrimSpace(inputs[fRecurrence].Value())),
+		Status:     "needsAction",
+		Source:     "taskctl",
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	if editTarget != nil {
+		t.Subtasks = editTarget.Subtasks
+	}
+	if dueStr := strings.TrimSpace(inputs[fDue].Value()); dueStr != "" {
+		d, err := nlpdate.Parse(dueStr)
+		if err != nil {
+			return nil, fmt.Errorf("datum nicht erkannt – versuche: morgen, nächsten montag, 2026-07-05")
+		}
+		t.DueDate = d
+	}
+	return t, nil
+}
+
 func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cmd {
 	return func() tea.Msg {
-		rawTitle := strings.TrimSpace(inputs[fTitle].Value())
-		if rawTitle == "" {
-			return taskSavedMsg{fmt.Errorf("title is required")}
-		}
-		title, priority := parsePriority(rawTitle)
-		listName := strings.TrimSpace(inputs[fList].Value())
-		if listName == "" {
-			// Resolve to the same list CreateTask would fall back to, so the
-			// local echo and the Apple-side reminder always agree — otherwise
-			// the local row stays "" forever while Apple creates it under its
-			// real default list, leaving a permanent phantom duplicate.
-			listName = reminders.DefaultList()
-		}
-		dueStr := strings.TrimSpace(inputs[fDue].Value())
-		notes := strings.TrimSpace(inputs[fNotes].Value())
-		url := strings.TrimSpace(inputs[fURL].Value())
-		recurrence := strings.ToLower(strings.TrimSpace(inputs[fRecurrence].Value()))
-
-		t := &models.Task{
-			ID:         "taskctl-" + uuid.New().String(),
-			Title:      title,
-			Priority:   priority,
-			List:       listName,
-			Notes:      notes,
-			URL:        url,
-			Recurrence: recurrence,
-			Status:     "needsAction",
-			Source:     "taskctl",
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
-		}
-		if dueStr != "" {
-			d, err := nlpdate.Parse(dueStr)
-			if err != nil {
-				return taskSavedMsg{fmt.Errorf("datum nicht erkannt – versuche: morgen, nächsten montag, 2026-07-05")}
-			}
-			t.DueDate = d
+		t, err := taskFromForm(inputs, editTarget)
+		if err != nil {
+			return taskSavedMsg{err}
 		}
 
 		s, err := store.New(config.DBPath(), config.Shared())
@@ -207,26 +217,12 @@ func effectiveURL(t *models.Task) string {
 	return firstURL(t.Notes)
 }
 
-// firstURL returns the first http(s):// link found in s, or "".
-func firstURL(s string) string {
-	lower := strings.ToLower(s)
-	hi := strings.Index(lower, "https://")
-	if hi < 0 {
-		hi = strings.Index(lower, "http://")
-	}
-	if hi < 0 {
-		return ""
-	}
-	url := s[hi:]
-	for i, r := range url {
-		if r == ' ' || r == '\n' || r == '\r' || r == '\t' ||
-			r == '<' || r == '>' || r == '"' || r == '\'' || r == ')' {
-			url = url[:i]
-			break
-		}
-	}
-	return url
-}
+var urlRe = regexp.MustCompile("(?i)https?://[^\\s<>\"')]*")
+
+// firstURL returns the first http(s):// link found in s, or "". Matches on s
+// itself: indexing a lowercased copy shifts byte offsets for runes whose
+// lowercase form has a different UTF-8 length (e.g. "İ").
+func firstURL(s string) string { return urlRe.FindString(s) }
 
 func deleteTaskCmd(t *models.Task) tea.Cmd {
 	taskCopy := *t

@@ -136,7 +136,8 @@ func stopDaemon() error {
 		return fmt.Errorf("no daemon running (no PID file)")
 	}
 	var pid int
-	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
+	// pid <= 0 must never reach Signal: kill(-n) targets a whole process group.
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil || pid <= 0 {
 		return fmt.Errorf("invalid PID file")
 	}
 	proc, err := os.FindProcess(pid)
@@ -157,7 +158,12 @@ func showDaemonStatus() error {
 		return nil
 	}
 	var pid int
-	fmt.Sscanf(string(data), "%d", &pid)
+	_, scanErr := fmt.Sscanf(string(data), "%d", &pid)
+	if scanErr != nil || pid <= 0 {
+		fmt.Println("Daemon: not running (invalid PID file)")
+		os.Remove(pidPath())
+		return nil
+	}
 	proc, err := os.FindProcess(pid)
 	if err != nil || proc.Signal(syscall.Signal(0)) != nil {
 		fmt.Println("Daemon: not running (stale PID file)")
