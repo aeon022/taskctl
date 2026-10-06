@@ -420,6 +420,22 @@ Claude calls `week_tasks` with `status=all` to get the full picture, then organi
 
 ---
 
+## Recent changes (October 2026)
+
+- **Window focus.** When the terminal window regains focus, the list reloads from the local database — at most every 5 seconds, and only while you are just browsing (never while a form, editor, search, palette or confirmation is open, so nothing you are typing is lost). Terminals that don't report focus events simply never trigger it.
+
+- **Clipboard.** `y` copies the selected task's title — now through OSC 52 as well as `pbcopy`, so it also works over SSH and inside tmux (your terminal must allow OSC 52; locally `pbcopy` still does the job).
+
+- **Footer and empty states.** The key-hint footer is the suite-wide one: it never wraps and drops the least important hints first on narrow terminals. Empty lists and loading screens show a short message with a hint what to press.
+
+- **Editing keeps subtasks.** Editing a task with `e` used to recreate it under a new ID and lose its (local) subtasks; they are now carried over.
+
+- **Daemon.** `taskctl daemon` refuses an invalid PID file (PID ≤ 0) instead of signalling a process group.
+
+- The TUI now runs on Bubble Tea v2; key bindings are unchanged.
+
+---
+
 ## Architecture
 
 ```
