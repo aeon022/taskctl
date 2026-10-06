@@ -309,15 +309,16 @@ func TestClickInDetailsPanelIsIgnored(t *testing.T) {
 	m := sized(loaded(t), 140, 32)
 	before := cursorID(m)
 	y := clickY(t, m, "c")
-	m, _ = send(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: m.listWidth() + appPadH + 5, Y: y})
+	detailX := m.sideWidth() + m.listWidth() + appPadH + 5 // right of the Lists sidebar and the Tasks panel
+	m, _ = send(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: detailX, Y: y})
 	if cursorID(m) != before {
 		t.Errorf("a click over the Details panel moved the cursor to %q", cursorID(m))
 	}
-	m, _ = send(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: 8, Y: y})
+	m, _ = send(m, tea.MouseClickMsg{Button: tea.MouseLeft, X: m.sideWidth() + appPadH + 8, Y: y})
 	if cursorID(m) != "c" {
 		t.Errorf("a click over the list selects: cursor %q", cursorID(m))
 	}
-	m, _ = send(m, tea.MouseMotionMsg{X: m.listWidth() + appPadH + 5, Y: y})
+	m, _ = send(m, tea.MouseMotionMsg{X: detailX, Y: y})
 	if m.hoverRow != -1 {
 		t.Errorf("no hover over the Details panel, got %d", m.hoverRow)
 	}
@@ -332,8 +333,8 @@ func TestEmptyStateInBothLayouts(t *testing.T) {
 		if !strings.Contains(out, "No tasks yet") || !strings.Contains(out, "0 open") {
 			t.Errorf("width %d empty state / header:\n%s", w, out)
 		}
-		if w >= wideMin && !strings.Contains(out, "No task selected") {
-			t.Errorf("wide empty: the Details panel says so:\n%s", out)
+		if w >= wideMin && !strings.Contains(out, "This week") {
+			t.Errorf("wide empty: the Details panel shows the week overview instead of an empty box:\n%s", out)
 		}
 	}
 }

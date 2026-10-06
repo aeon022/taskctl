@@ -33,7 +33,8 @@ func loadLastSyncedCmd() tea.Cmd {
 // popup, search, palette, confirm or batch selection, and nothing in flight.
 func (m Model) browsing() bool {
 	return m.view == viewList && !m.loading && !m.syncing && !m.focusLoading &&
-		!m.searching && !m.inPalette && !m.selecting && m.deleteTarget == nil && !m.addingSubtask
+		!m.searching && !m.inPalette && !m.selecting && m.deleteTarget == nil && !m.addingSubtask &&
+		m.filterMenu == menuNone && !m.sideFocus
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -66,7 +67,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusLoading = false
 		m.lastLoad = time.Now()
 		m.tasks = msg.tasks
-		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+		m.rows = m.rebuildRows()
 		m.loading = false
 		m.cursor = firstTaskRow(m.rows)
 		for i, r := range m.rows {
@@ -101,11 +102,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			m.tasks = msg.tasks
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+			m.rows = m.rebuildRows()
 			m.cursor = firstTaskRow(m.rows)
 			m.err = nil
 			m.lastSynced = time.Now()
 			_ = lastsync.Save(config.LastSyncedPath(), m.lastSynced)
+			if m.showDone { // the sync result holds open tasks only; bring the completed ones back
+				return m, loadTasks(true)
+			}
 		}
 
 	case taskSavedMsg:
@@ -234,6 +238,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseLeft:
+			x, y := msg.X-appPadH, msg.Y-appPadV
+			if i := m.tabHitTest(x, y); i >= 0 {
+				return m.setTab(listTab(i))
+			}
+			if i := m.chipHitTest(x, y); i >= 0 {
+				return m.removeChip(m.chips()[i].kind), nil
+			}
+			if i := m.sideHitTest(x, y); i >= 0 {
+				return m.pickSide(i), nil
+			}
 			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 && m.inListArea(msg.X-appPadH) {
 				now := time.Now()
 				if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
@@ -263,7 +277,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						now := time.Now()
 						t.CompletedAt = &now
 					}
-					m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+					m.rows = m.rebuildRows()
 					return m, toggleDoneCmd(t)
 				}
 			}
@@ -529,13 +543,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "enter":
 			m.searching = false
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+			m.rows = m.rebuildRows()
 			m.cursor = firstTaskRow(m.rows)
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
-		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+		m.rows = m.rebuildRows()
 		m.cursor = firstTaskRow(m.rows)
 		return m, cmd
 	}
@@ -559,7 +573,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		case "esc":
 			m.selecting = false
 			m.selected = nil
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+			m.rows = m.rebuildRows()
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -600,7 +614,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				}
 				m.selecting = false
 				m.selected = nil
-				m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+				m.rows = m.rebuildRows()
 				return m, batchCompleteCmd(sel)
 			}
 		case "d", "D":
@@ -612,10 +626,36 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// ── filter menu / sidebar focus ───────────────────────────────────────
+	if m.filterMenu != menuNone {
+		return m.handleFilterMenuKey(msg)
+	}
+	if m.sideFocus {
+		return m.handleSideKey(msg)
+	}
+
 	// ── list view ─────────────────────────────────────────────────────────
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+
+	case "tab", "]":
+		return m.cycleTab(1)
+	case "shift+tab", "[":
+		return m.cycleTab(-1)
+
+	case "f":
+		m.filterMenu = menuMain
+
+	case "x", "esc":
+		if m.anyFilter() {
+			return m.clearFilters()
+		}
+
+	case "h", "left":
+		if m.sidebar() {
+			m.sideFocus, m.sideCursor = true, m.sideActive()
+		}
 
 	case "?":
 		m = m.openHelp()
@@ -658,9 +698,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return m, tea.Batch(syncCmd(), m.sp.Tick)
 		}
 
-	case "c":
-		m.showDone = !m.showDone
-		return m, loadTasks(m.showDone)
+	case "c": // the old show-completed toggle is the Done tab now
+		if m.tab == tabDone {
+			return m.setTab(tabAll)
+		}
+		return m.setTab(tabDone)
 
 	case "t":
 		if m.filter == filterFocus {
@@ -669,7 +711,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.filter = filterFocus
 		}
 		m.saveUIState()
-		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+		m.rows = m.rebuildRows()
 		m.cursor = firstTaskRow(m.rows)
 		return m, nil
 
@@ -680,7 +722,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.filter = filterOverdue
 		}
 		m.saveUIState()
-		m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+		m.rows = m.rebuildRows()
 		m.cursor = firstTaskRow(m.rows)
 		return m, nil
 
@@ -704,7 +746,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				now := time.Now()
 				t.CompletedAt = &now
 			}
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+			m.rows = m.rebuildRows()
 			return m, toggleDoneCmd(t)
 		}
 
@@ -718,7 +760,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if t := cursorTask(m); t != nil {
 			tomorrow := time.Now().AddDate(0, 0, 1)
 			t.DueDate = &tomorrow
-			m.rows = buildRows(m.tasks, m.searchQuery(), m.filter)
+			m.rows = m.rebuildRows()
 			return m, postponeCmd(t, tomorrow)
 		}
 

@@ -49,17 +49,22 @@ func (m Model) wide() bool {
 	return w+2*appPadH >= wideMin
 }
 
+// listWidth is the outer width of the task list: all of it in the narrow
+// layout, 3/5 of what the Lists sidebar leaves in the wide one.
 func (m Model) listWidth() int {
 	w, _ := m.dims()
 	if m.wide() {
-		return w * 3 / 5
+		return (w - m.sideWidth()) * 3 / 5
 	}
 	return w
 }
 
 // inListArea reports whether content column x is over the task list (always
-// true in the single-panel layout; the right panel is not clickable).
-func (m Model) inListArea(x int) bool { return !m.wide() || x < m.listWidth() }
+// true in the single-panel layout; the sidebar and the Details panel have
+// their own click handling).
+func (m Model) inListArea(x int) bool {
+	return !m.wide() || (x >= m.sideWidth() && x < m.sideWidth()+m.listWidth())
+}
 
 // renderHeader is the one header shared by every view: app name left, a
 // middle label (the counts on the list, the section elsewhere), the date right.
@@ -153,13 +158,18 @@ func (m Model) toastLine() string {
 	return ansi.Truncate("  "+s, max(w, 0), "…")
 }
 
-// chromeAbove is the number of lines above the body: header + divider, the
-// optional filter line, the 2-line search bar, the palette block.
+// chromeAbove is the number of lines above the body: header + divider + the
+// view tabs, the optional chips row, filter line and filter menu, the 2-line
+// search bar, the palette block.
 func (m Model) chromeAbove() int {
-	n := 2
+	n := 3 // header, divider, view tabs
+	if len(m.chips()) > 0 {
+		n++
+	}
 	if m.extraLine() != "" {
 		n++
 	}
+	n += m.filterMenuHeight()
 	if m.searching {
 		n += 2
 	}
@@ -356,6 +366,10 @@ func (m Model) listLines(width, height int) []string {
 		switch {
 		case m.searchQuery() != "":
 			title = "No tasks match your search"
+		case m.tab != tabAll:
+			title, hint = "Nothing in "+tabLabels[m.tab], "press tab for another view"
+		case m.listFilter != "" || m.prioFilter != 0:
+			title, hint = "No tasks match these filters", "press x to clear them"
 		case m.filter == filterFocus:
 			title, hint = "No tasks due today or overdue", "press t to show all tasks"
 		case m.filter == filterOverdue:
@@ -398,10 +412,11 @@ func (m Model) listLines(width, height int) []string {
 }
 
 // detailText is the right-hand panel: every field of the selected task.
-func (m Model) detailText(width int) string {
+func (m Model) detailText(width, height int) string {
 	t := cursorTask(m)
 	if t == nil {
-		return styleSubhead.Render("No task selected")
+		// nothing selected: the week overview fills the otherwise empty panel
+		return strings.Join(m.overviewLines(), "\n")
 	}
 	label := func(s string) string { return styleSubhead.Render(fmt.Sprintf("%-9s", s)) }
 	var b strings.Builder
@@ -446,6 +461,10 @@ func (m Model) detailText(width int) string {
 	if t.Notes != "" {
 		b.WriteString("\n" + label("Notes") + "\n" + lipgloss.NewStyle().Width(max(width, 1)).Render(t.Notes) + "\n")
 	}
+	// the overview goes below the task, but only when all of it fits
+	if ov := m.overviewLines(); height-strings.Count(b.String(), "\n")-1 >= len(ov)+1 {
+		b.WriteString("\n" + strings.Join(ov, "\n") + "\n")
+	}
 	return b.String()
 }
 
@@ -455,9 +474,15 @@ func (m Model) renderList() string {
 	w, h := m.dims()
 
 	var top []string
-	top = append(top, m.renderHeader(m.summary()), m.renderDivider())
+	top = append(top, m.renderHeader(m.summary()), m.renderDivider(), m.tabsLine())
+	if c := m.chipsLine(); c != "" {
+		top = append(top, c)
+	}
 	if x := m.extraLine(); x != "" {
 		top = append(top, x)
+	}
+	if m.filterMenu != menuNone {
+		top = append(top, m.filterMenuLine())
 	}
 	// The inputs are 40 cells wide by default; shrink them (and drop the hint)
 	// so none of these lines can outgrow a narrow terminal.
@@ -493,10 +518,14 @@ func (m Model) renderList() string {
 
 	var body string
 	if m.wide() {
-		lw, bh := m.listWidth(), m.bodyHeight()
-		left := ui.Panel(lw, bh, "Tasks", strings.Join(m.listLines(lw-4, bh-2), "\n"), true)
-		right := ui.Panel(w-lw, bh, "Details", m.detailText(w-lw-4), false)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+		lw, bh, sw := m.listWidth(), m.bodyHeight(), m.sideWidth()
+		left := ui.Panel(lw, bh, "Tasks", strings.Join(m.listLines(lw-4, bh-2), "\n"), !m.sideFocus)
+		right := ui.Panel(w-sw-lw, bh, "Details", m.detailText(w-sw-lw-4, bh-2), false)
+		panels := []string{left, right}
+		if sw > 0 {
+			panels = append([]string{ui.Panel(sw, bh, "Lists", m.sidebarText(sw-4, bh-2), m.sideFocus)}, panels...)
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, panels...)
 	} else {
 		body = strings.Join(m.listLines(w, m.listHeight()), "\n")
 	}
@@ -534,12 +563,12 @@ func (m Model) renderStatusBar() string {
 		return ansi.Truncate(fmt.Sprintf("  Delete %q?  %sconfirm  any cancel", m.deleteTarget.Title, styleKey.Render("y")+":"), max(w, 0), "…")
 	}
 	doneLabel := "show done"
-	if m.showDone {
+	if m.tab == tabDone {
 		doneLabel = "hide done"
 	}
 	pairs := [][2]string{
 		{"↑/↓", "nav"}, {"space", "done"}, {"?", "help"}, {"q", "quit"},
-		{"n", "new"}, {"enter", "details"}, {"/", "search"}, {"e", "edit"},
+		{"n", "new"}, {"enter", "details"}, {"/", "search"}, {"tab", "view"}, {"f", "filter"}, {"e", "edit"},
 		{"d", "delete"}, {"u", "undo"}, {"p", "pomo"}, {"v", "select"},
 		{"t", "focus"}, {"s", "sync"}, {"i", "stats"}, {"c", doneLabel},
 		{"o", "open url"}, {"S", "postpone"},

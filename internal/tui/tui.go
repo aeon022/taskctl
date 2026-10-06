@@ -144,6 +144,13 @@ type Model struct {
 	flash string
 	// list filter: at most one of focus (today+overdue) or overdue-only active
 	filter listFilterMode
+	// view tabs and filter chips (views.go); not persisted
+	tab        listTab
+	listFilter string // only this list ("" = all)
+	prioFilter int    // only this priority: 1 high, 5 medium, 9 low (0 = any)
+	filterMenu filterMenuState
+	sideFocus  bool // the Lists sidebar has keyboard focus (>= sidebarMin cols)
+	sideCursor int  // sidebar entry under the cursor (0 = "All lists")
 	// batch select
 	selecting bool
 	selected  map[string]bool

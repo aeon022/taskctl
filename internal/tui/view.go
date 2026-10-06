@@ -129,7 +129,11 @@ func (m Model) helpContent() string {
 		Row(":", "command palette — type an action by name").
 		Row("t", "focus mode — today & overdue only").
 		Row("O", "filter — overdue only").
-		Row("c", "show / hide completed tasks").
+		Row("c", "Done view — show / hide completed tasks").
+		Row("tab / ] / [", "next / previous view: All · Today · Overdue · Next 7 days · No date · Done").
+		Row("f", "filter by list (l) or priority (p); x clears everything").
+		Row("x / esc", "clear view and filters").
+		Row("h / ←", "Lists sidebar (≥ 140 columns): j/k move, enter filter, esc back").
 		Section("Tasks").
 		Row("space", "toggle done").
 		Row("enter", "task details (a subtask, space toggle, x remove)").

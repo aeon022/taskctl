@@ -32,6 +32,12 @@ func (m Model) searchQuery() string {
 // this function builds. Fuzzy only widens WHICH tasks match; the original
 // list-grouped order is preserved.
 func buildRows(tasks []models.Task, query string, filter listFilterMode) []row {
+	return buildRowsWith(tasks, query, filter, nil)
+}
+
+// buildRowsWith is buildRows narrowed further by keep (nil = keep all). The
+// rows point into tasks, so callers must pass m.tasks itself.
+func buildRowsWith(tasks []models.Task, query string, filter listFilterMode, keep func(*models.Task) bool) []row {
 	now := time.Now()
 	eod := dateutil.EndOfDay(now)
 	sod := dateutil.StartOfDay(now)
@@ -62,6 +68,9 @@ func buildRows(tasks []models.Task, query string, filter listFilterMode) []row {
 			if t.DueDate == nil || !t.DueDate.Before(sod) {
 				continue
 			}
+		}
+		if keep != nil && !keep(t) {
+			continue
 		}
 		if query != "" && !titleMatch[i] && !strings.Contains(strings.ToLower(t.Notes), query) {
 			continue

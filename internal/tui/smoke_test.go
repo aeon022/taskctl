@@ -22,6 +22,9 @@ var smokeKeys = []string{
 	":", "esc", // command palette
 	"v", "space", "esc", // multi-select
 	"t", "O", "t", // focus / overdue filters
+	"tab", "]", "shift+tab", "[", "tab", "tab", "tab", "tab", "tab", "tab", // view tabs, wrapping through Done
+	"f", "l", "1", "f", "p", "2", "f", "esc", "f", "x", // filter menu: list, priority, cancel, clear
+	"h", "j", "esc", "x", // sidebar focus (>= 140 cols only) and clear-all
 	"d", "n", // delete confirm → cancel
 	"u", "c", "c", // undo, show/hide done
 	"e", "esc", // edit form
@@ -79,5 +82,13 @@ func TestFooterKeepsMostImportantHintsWhenNarrow(t *testing.T) {
 	out := ansi.Strip(m.renderStatusBar())
 	if !strings.Contains(out, "↑/↓ nav") {
 		t.Errorf("highest-priority hint must survive: %q", out)
+	}
+}
+
+// The three-panel layout (Lists sidebar at >= 140 columns) with its own keys.
+func TestSmokeSidebarLayout(t *testing.T) {
+	for _, size := range [][2]int{{150, 34}, {140, 20}} {
+		m := viewsModel(t, size[0], size[1])
+		tuitest.SmokeSize(t, m, size[0], size[1], "h", "j", "j", "enter", "h", "k", "esc", "tab", "f", "l", "1", "x", "c", "c", "/", "w", "enter", "x", "j", "enter", "esc")
 	}
 }

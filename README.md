@@ -61,7 +61,11 @@ Local-first task manager for macOS. Syncs with Apple Reminders via EventKit. Par
 | `S` | Postpone to tomorrow |
 | `s` | Sync with Apple Reminders |
 | `t` | Focus mode — today and overdue only |
-| `c` | Toggle show completed |
+| `c` | Done view (completed tasks) — press again to go back to All |
+| `tab` / `]` · `shift+tab` / `[` | Next / previous view: All · Today · Overdue · Next 7 days · No date · Done |
+| `f` | Filter by list or priority (`l`, `p`; `x` clears everything) |
+| `x` / `esc` | Clear the view tab and all filters |
+| `h` / `←` | Focus the Lists sidebar (terminal ≥ 140 columns) |
 | `v` | Stats view |
 | `p` | Start Pomodoro (25 min) |
 | `/` | Search |
@@ -246,12 +250,53 @@ Start the TUI with `taskctl` (no subcommand).
 | `S` | Postpone selected task to tomorrow |
 | `s` | Sync with Apple Reminders |
 | `t` | Toggle focus mode — shows only today and overdue tasks |
-| `c` | Toggle display of completed tasks |
+| `c` | Done view — shows only completed tasks; `c` again returns to All |
+| `tab` / `]`, `shift+tab` / `[` | Cycle the view tabs (see below) |
+| `f` | Open the filter menu (see below) |
+| `x` / `esc` | Clear the view tab, chips and the focus/overdue filter |
+| `h` / `←` | Move into the Lists sidebar (≥ 140 columns) |
 | `v` | Open stats view |
 | `p` | Start a 25-minute Pomodoro timer (shown in header; notification on completion) |
 | `/` | Search tasks by title |
 | `A` | Enter batch mode |
 | `q` | Quit |
+
+### Views, filters and the Lists sidebar
+
+Under the header a tab row shows the **views** with live counts:
+
+`All 75 · Today 1 · Overdue 5 · Next 7 days 8 · No date 3 · Done`
+
+| View | Shows |
+|------|-------|
+| All | every open task |
+| Today | due today |
+| Overdue | due before today |
+| Next 7 days | due tomorrow up to and including the day 7 days ahead |
+| No date | no due date |
+| Done | completed tasks (this is what `c` toggles; they are loaded only while this view is open, so its count appears once you have opened it) |
+
+Switch with `tab` / `]` (next) and `shift+tab` / `[` (previous, wrapping around), or click a tab.
+The counts reflect every filter *except* the view itself, so they always tell you what you would
+get by switching.
+
+**Filter chips.** `f` opens a one-line menu: `l` → pick a list with `1`–`9` (`0` = any list),
+`p` → pick a priority (`1` high · `2` medium · `3` low, `0` = any), `x` → clear everything,
+`esc` → cancel. Active filters appear as chips under the tabs — `Baby ×`, `P1 ×`, and `/query ×`
+for a search you have confirmed with `enter`. Click a chip to remove it; `x` or `esc` in the list
+clears the view tab and all chips at once. Filters combine with each other and with the view;
+the older `t` (today + overdue) and `O` (overdue only) modes still work on top.
+
+**Lists sidebar (terminal ≥ 140 columns).** A panel on the left lists every list with its open
+count and a red dot when it has overdue tasks. Click a list to filter by it (click it again, or
+"All lists", to clear). From the keyboard press `h` or `←` to move into it, `j`/`k` to move,
+`enter` to apply, `esc` or `l`/`→` to go back. Below 140 columns the sidebar is hidden and the
+two-panel layout (≥ 120) or the plain list is used as before.
+
+**Overview.** When the Details panel has room, a "This week" block appears below the selected
+task (or alone when nothing is selected): overdue / today / next 7 days, a seven-day sparkline of
+what is due per day starting today, and the lists with the most overdue tasks. The view and
+filter state is not remembered between runs.
 
 ### Batch Mode
 
