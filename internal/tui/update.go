@@ -234,7 +234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseLeft:
-			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 {
+			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 && m.inListArea(msg.X-appPadH) {
 				now := time.Now()
 				if i == m.lastClickRow && now.Sub(m.lastClickAt) < doubleClickWindow {
 					m.cursor = i
@@ -253,7 +253,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseRight:
 			// Toggle done on whatever row was clicked, not the cursor row —
 			// a quick-action shouldn't require selecting first.
-			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 {
+			if i := m.rowHitTest(msg.Y - appPadV); i >= 0 && m.inListArea(msg.X-appPadH) {
 				if t := taskAtRow(m, i); t != nil {
 					if t.Done() {
 						t.Status = "needsAction"
@@ -272,7 +272,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		if m.view == viewList {
-			m.hoverRow = m.rowHitTest(msg.Y - appPadV)
+			m.hoverRow = -1
+			if m.inListArea(msg.X - appPadH) {
+				m.hoverRow = m.rowHitTest(msg.Y - appPadV)
+			}
 		}
 		return m, nil
 

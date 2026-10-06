@@ -123,6 +123,7 @@ type Model struct {
 	err          error
 	width        int
 	height       int
+	contentSized bool // set on the render copy once width/height exclude the app padding (see dims)
 	// form
 	inputs        [fCount]textinput.Model
 	inputIdx      int

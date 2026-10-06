@@ -8,14 +8,9 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/aeon022/missionctl-core/dateutil"
 	"github.com/aeon022/missionctl-core/emptystate"
-	"github.com/aeon022/missionctl-core/humanize"
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
-	"github.com/aeon022/missionctl-core/palette"
-	"github.com/aeon022/missionctl-core/statusbar"
-	"github.com/aeon022/missionctl-core/theme"
 )
 
 func (m Model) View() tea.View {
@@ -34,6 +29,7 @@ func (m Model) viewContent() string {
 	}
 	m.width -= appPadH * 2
 	m.height -= appPadV * 2
+	m.contentSized = true
 
 	var content string
 	switch m.view {
@@ -58,24 +54,6 @@ func (m Model) viewContent() string {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
-// renderHeader is the one header shared by every view: app name + current
-// section on the left, the live date right-aligned — a constant anchor no
-// matter which screen is active. Degrades to just the left side if the
-// terminal is too narrow for both.
-func (m Model) renderHeader(section string) string {
-	left := styleHeader.Render("taskctl") + styleSubhead.Render(" · "+section)
-	right := styleSubhead.Render(time.Now().Format("Mon, 02 Jan 2006"))
-	if pad := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2; pad >= 1 {
-		return "  " + left + strings.Repeat(" ", pad) + right
-	}
-	return "  " + left
-}
-
-// renderDivider draws the rule under the header, full terminal width.
-func (m Model) renderDivider() string {
-	return styleSep.Render(strings.Repeat("─", max(0, m.width)))
-}
-
 // groupCounts tallies how many task rows fall under each list-section
 // header in m.rows, for the "(n)" badge next to each list name.
 func (m Model) groupCounts() map[string]int {
@@ -89,220 +67,6 @@ func (m Model) groupCounts() map[string]int {
 		counts[label]++
 	}
 	return counts
-}
-
-func (m Model) renderList() string {
-	var b strings.Builder
-	b.WriteString(m.renderHeader("Tasks") + "\n")
-	b.WriteString(m.renderDivider() + "\n")
-
-	extra := ""
-	if m.syncing {
-		extra = "  " + m.sp.View() + styleSubhead.Render(" syncing…")
-	} else if !m.lastSynced.IsZero() {
-		extra = "  " + styleSubhead.Render("synced "+humanize.TimeAgo(m.lastSynced))
-	}
-	switch m.filter {
-	case filterFocus:
-		extra += "  " + styleFocusBadge.Render("focus: today & overdue")
-	case filterOverdue:
-		extra += "  " + styleFocusBadge.Render("overdue only")
-	}
-	if m.selecting {
-		extra += "  " + theme.Selected.Render(fmt.Sprintf("select: %d", len(m.selected))) +
-			styleSubhead.Render("  space toggle  A all  enter done  d delete  esc cancel")
-	}
-	// Blank line always follows, even when extra is empty — otherwise a
-	// non-empty summary/badge line here sits flush against the first list
-	// header right below it.
-	b.WriteString(extra + "\n\n")
-
-	if m.searching {
-		b.WriteString("  " + styleKey.Render("/") + " " + m.searchInput.View() + "  (enter/esc to close)\n\n")
-	}
-
-	if m.inPalette {
-		b.WriteString("  " + styleKey.Render(":") + " " + m.paletteInput.View() + "\n")
-		matches := palette.Match(paletteCommands, m.paletteInput.Value())
-		if len(matches) > 6 {
-			matches = matches[:6]
-		}
-		if len(matches) == 0 {
-			b.WriteString("    " + styleSubhead.Render("no matching command") + "\n")
-		}
-		for i, c := range matches {
-			row := fmt.Sprintf("%-11s %s", c.Name, c.Desc)
-			if i == m.paletteCursor {
-				b.WriteString("    " + styleSelected.Render("▶ "+row) + "\n")
-			} else {
-				b.WriteString("      " + styleSubhead.Render(row) + "\n")
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	query := m.searchQuery()
-	listHeight := m.listHeight()
-	counts := m.groupCounts()
-	listColors := make(map[string]string, len(m.listEntries))
-	for _, e := range m.listEntries {
-		if e.Color != "" {
-			listColors[e.Name] = e.Color
-		}
-	}
-
-	linesWritten := 0
-	if len(m.rows) == 0 {
-		var title, hint string
-		switch {
-		case m.searchQuery() != "":
-			title = "No tasks match your search"
-		case m.filter == filterFocus:
-			title, hint = "No tasks due today or overdue", "press t to show all tasks"
-		case m.filter == filterOverdue:
-			title, hint = "No overdue tasks", "press O to show all tasks"
-		case len(m.tasks) == 0:
-			title, hint = "No tasks yet", "press n to add one, or s to sync with Apple Reminders"
-		default:
-			title = "No tasks found"
-		}
-		// Centered in the space the fixed-bottom footer leaves available.
-		block := emptystate.Render(m.width, max(listHeight, 1), "", title, hint)
-		b.WriteString(block + "\n")
-		linesWritten += lipgloss.Height(block)
-	}
-
-	visible, start := m.visibleRowsWithStart(listHeight)
-	// visibleRowsWithStart windows by row COUNT, but a section header costs
-	// 2-3 physical lines (blank + label + rule) against a budget sized in
-	// row units — with several list groups on screen that mismatch renders
-	// more physical lines than listHeight allows, scrolling the terminal
-	// and pushing the app header (printed above this loop) off the top.
-	// Stop hard at the real line budget rather than trusting the row-count
-	// window alone (same fix as calctl's renderList).
-	for localI, r := range visible {
-		if linesWritten >= listHeight {
-			break
-		}
-		i := start + localI
-		if r.isHeader {
-			if i > 0 {
-				b.WriteString("\n")
-				linesWritten++
-			}
-			badge := " " + styleCountBadge.Render(fmt.Sprintf("%d", counts[r.label]))
-			bullet := ""
-			if c := listColors[r.label]; c != "" {
-				bullet = lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("● ")
-			}
-			b.WriteString("  " + bullet + styleHeader.Render(r.label) + badge + "\n")
-			b.WriteString("  " + styleSep.Render(strings.Repeat("─", max(0, m.width-2))) + "\n")
-			linesWritten += 2
-			continue
-		}
-		t := r.task
-		// selection checkbox vs done mark
-		var mark string
-		if m.selecting {
-			if m.selected[t.ID] {
-				mark = styleSelected.Render("[x]")
-			} else {
-				mark = styleSubhead.Render("[ ]")
-			}
-		} else if t.Done() {
-			mark = "✓"
-		} else {
-			mark = "○"
-		}
-
-		// priority indicator
-		prio := ""
-		switch t.Priority {
-		case 1:
-			prio = styleUrgent.Render("‼ ")
-		case 5:
-			prio = styleImportant.Render("! ")
-		case 9:
-			prio = styleSubhead.Render("↓ ")
-		}
-
-		var line string
-		switch {
-		case t.Done() && !m.selecting:
-			line = styleDone.Render(t.Title)
-		case i == m.cursor:
-			// The cursor row wraps its whole line in a single
-			// styleCursor.Render() call below — nesting highlighted
-			// (real-ANSI) text here would clobber that background for
-			// everything after it, so the cursor row's title stays plain.
-			line = prio + styleTitle.Render(t.Title)
-		default:
-			line = prio + highlightMatches(t.Title, fuzzyMatchIndexes(query, t.Title), styleTitle)
-		}
-
-		due := ""
-		if t.DueDate != nil {
-			now := time.Now()
-			switch {
-			case t.DueDate.Before(dateutil.StartOfDay(now)):
-				due = "  " + styleOverdue.Render("overdue "+t.DueDate.Format("Jan 02"))
-			case !t.DueDate.After(dateutil.EndOfDay(now)):
-				due = "  " + styleToday.Render("due today")
-			default:
-				due = "  " + styleDue.Render("due "+t.DueDate.Format("Mon Jan 02"))
-			}
-		}
-		recur := ""
-		if t.Recurrence != "" {
-			recur = "  " + styleRecur.Render("↻ "+t.Recurrence)
-		}
-		link := ""
-		if effectiveURL(t) != "" {
-			link = "  " + styleRecur.Render("↗")
-		}
-		// One leading column is reserved for the cursor's list-color accent
-		// bar, applied outside styleCursor.Render() below — nesting an
-		// already-colored glyph inside that call would clobber its color
-		// (same hazard noted above for the cursor row's title).
-		row := fmt.Sprintf(" %s  %s%s%s%s", mark, line, due, recur, link)
-		prefix := " "
-		switch {
-		case i == m.cursor:
-			barStyle := lipgloss.NewStyle().Foreground(colorBlue)
-			if c := listColors[t.List]; c != "" {
-				barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(c))
-			}
-			prefix = barStyle.Render("▎")
-			row = prefix + styleCursor.Render(row)
-		case i == m.hoverRow:
-			row = prefix + theme.HoverV2.Render(row)
-		default:
-			row = prefix + row
-		}
-		b.WriteString(row + "\n")
-		linesWritten++
-	}
-
-	// Pin the footer to the bottom of the screen instead of letting it
-	// glue itself right under a short list — pad the body out to its
-	// full line budget first, matching notectl's fixed-height list pane.
-	for ; linesWritten < listHeight; linesWritten++ {
-		b.WriteString("\n")
-	}
-
-	if m.lastDeleted != nil {
-		b.WriteString("\n  " + styleSubhead.Render(fmt.Sprintf("Deleted %q — press u to undo", m.lastDeleted.Title)) + "\n")
-	}
-	if m.flash != "" {
-		b.WriteString("\n  " + styleSelected.Render(m.flash) + "\n")
-	}
-	if m.err != nil {
-		b.WriteString("\n  " + styleErr.Render(m.err.Error()) + "\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(m.renderStatusBar())
-	return b.String()
 }
 
 // visibleRowsWithStart returns the scroll-windowed slice of m.rows that
@@ -331,41 +95,6 @@ func (m Model) visibleRowsWithStart(height int) ([]row, int) {
 		end = start + height
 	}
 	return m.rows[start:end], start
-}
-
-// rowHitTest returns the m.rows index at screen row y, or -1 if the click
-// missed (landed on a section header, blank line, or outside the list).
-// Mirrors the exact line-counting renderList uses: header, divider,
-// extra/summary line, its trailing blank line (4 lines, hence row := 4),
-// then an optional 2-line search bar, then each row consumes 1 line —
-// except section headers, which consume 2 lines (label + rule), plus a
-// leading blank line for every header after the first. Walks the same
-// scroll window renderList computes, so a click lands on the row it
-// visually appears to be over even once the list has scrolled.
-func (m Model) rowHitTest(y int) int {
-	row := 4
-	if m.searching {
-		row += 2
-	}
-	visible, start := m.visibleRowsWithStart(m.listHeight())
-	for localI, r := range visible {
-		i := start + localI
-		if r.isHeader {
-			if i > 0 {
-				row++
-			}
-			if y >= row && y < row+2 {
-				return -1
-			}
-			row += 2
-			continue
-		}
-		if y == row {
-			return i
-		}
-		row++
-	}
-	return -1
 }
 
 func (m Model) helpContent() string {
@@ -518,63 +247,6 @@ func (m Model) renderDetailPopup() string {
 	b.WriteString("\n" + styleSubhead.Render(footer))
 
 	return stylePopupBorder.Width(popW).Render(b.String())
-}
-
-// narrowFooter reports whether the terminal is too narrow for the full
-// two-line key legend, which crowds/wraps below this width.
-func (m Model) narrowFooter() bool { return m.width > 0 && m.width < 90 }
-
-func (m Model) renderStatusBar() string {
-	w := max(m.width-2, 0) // 2-column indent
-	row := func(pairs ...[2]string) string { return "  " + statusbar.Hints(w, pairs...) + "\n" }
-
-	if m.deleteTarget != nil {
-		return fmt.Sprintf("  Delete %q?  %sconfirm  any cancel\n",
-			m.deleteTarget.Title, styleKey.Render("y")+":")
-	}
-	if m.narrowFooter() {
-		return row([2]string{"↑/↓", "nav"}, [2]string{"space", "done"}, [2]string{"n", "new"},
-			[2]string{"/", "search"}, [2]string{"?", "help"}, [2]string{"q", "quit"})
-	}
-	doneLabel := "show done"
-	if m.showDone {
-		doneLabel = "hide done"
-	}
-	line1 := row([2]string{"↑/↓", "nav"}, [2]string{"space", "done"}, [2]string{"enter", "details"},
-		[2]string{"n/e/d", "new/edit/delete"}, [2]string{"o", "open url"}, [2]string{"S", "postpone"})
-	line2 := row([2]string{"u", "undo"}, [2]string{"p", "pomo"}, [2]string{"v", "select"}, [2]string{"t", "focus"},
-		[2]string{"/", "search"}, [2]string{"i", "stats"}, [2]string{"s", "sync"}, [2]string{"c", doneLabel},
-		[2]string{"?", "help"}, [2]string{"q", "quit"})
-	return line1 + line2
-}
-
-func (m Model) statusBarHeight() int {
-	if m.narrowFooter() {
-		return 1
-	}
-	return 2
-}
-
-// listHeight is the line budget available for task rows. The "6" is the
-// fixed overhead empirically verified against the rendered output: header,
-// divider, extra/summary line, the blank breathing-room line now after it,
-// plus the pre-footer blank line and one more line of slack accounted for
-// by testing rather than a clean derivation from the render calls alone.
-// Changing anything in that fixed top/bottom block requires re-checking
-// this against an actual render (see rowHitTest's matching row := 4).
-func (m Model) listHeight() int {
-	h := m.height - 6 - m.statusBarHeight()
-	if m.searching {
-		h -= 2
-	}
-	if m.inPalette {
-		// input line + up to 6 match rows + trailing blank — must match
-		// what the palette block in View() actually renders, or the task
-		// list below overflows the terminal and pushes the input/matches
-		// themselves off the top of the screen.
-		h -= 8
-	}
-	return h
 }
 
 func (m Model) renderForm() string {
