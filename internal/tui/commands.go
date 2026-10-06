@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/aeon022/missionctl-core/activity"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -188,6 +189,9 @@ func saveTaskCmd(inputs [fCount]textinput.Model, editTarget *models.Task) tea.Cm
 		_ = s.UpsertTask(ctx, t)
 		// sync to backend provider in background
 		go func() { _ = reminders.CreateTask(t) }()
+		if editTarget == nil { // an edit re-creates the row, it isn't a new task
+			activity.Log("taskctl", "added", t.Title)
+		}
 
 		return taskSavedMsg{}
 	}
@@ -236,6 +240,7 @@ func deleteTaskCmd(t *models.Task) tea.Cmd {
 			_ = s.AddPendingDelete(ctx, &taskCopy)
 		}
 		go func() { _ = reminders.DeleteTask(&taskCopy) }()
+		activity.Log("taskctl", "deleted", taskCopy.Title)
 		return taskDeletedMsg{task: &taskCopy}
 	}
 }
@@ -268,6 +273,10 @@ func toggleDoneCmd(t *models.Task) tea.Cmd {
 				s2.Close()
 			}
 		}()
+
+		if wantDone {
+			activity.Log("taskctl", "completed", taskCopy.Title)
+		}
 
 		// spawn next occurrence for recurring tasks
 		if wantDone && taskCopy.Recurrence != "" {
@@ -359,6 +368,7 @@ func batchCompleteCmd(tasks []*models.Task) tea.Cmd {
 			t.CompletedAt = &now
 			_ = s.UpsertTask(ctx, t)
 			_ = s.AddPendingStatus(ctx, t.Title, t.List, "completed")
+			activity.Log("taskctl", "completed", t.Title)
 		}
 		return batchDoneMsg{}
 	}
@@ -381,6 +391,7 @@ func batchDeleteCmd(tasks []*models.Task) tea.Cmd {
 				_ = s.AddPendingDelete(ctx, &copies[i])
 			}
 			go func() { _ = reminders.DeleteTask(&copies[i]) }()
+			activity.Log("taskctl", "deleted", copies[i].Title)
 		}
 		return batchDeletedMsg{count: len(copies)}
 	}

@@ -9,6 +9,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/aeon022/missionctl-core/activity"
 	"github.com/aeon022/taskctl/internal/config"
 	"github.com/aeon022/taskctl/internal/models"
 	"github.com/aeon022/taskctl/internal/reminders"
@@ -54,6 +55,7 @@ func Create(s *store.Store, title, list, notes, url string, due *time.Time) (*mo
 	if err := reminders.CreateTask(t); err != nil {
 		return t, err
 	}
+	activity.Log("taskctl", "added", t.Title)
 	return t, nil
 }
 
@@ -82,6 +84,7 @@ func Complete(s *store.Store, title, list string) error {
 	if s != nil {
 		_ = s.ClearPendingStatus(ctx, title, list)
 	}
+	activity.Log("taskctl", "completed", title)
 	return nil
 }
 
@@ -105,5 +108,9 @@ func Delete(s *store.Store, title, list string) error {
 		_ = s.AddPendingDelete(ctx, t)
 	}
 
-	return reminders.DeleteTask(t)
+	if err := reminders.DeleteTask(t); err != nil {
+		return err
+	}
+	activity.Log("taskctl", "deleted", title)
+	return nil
 }

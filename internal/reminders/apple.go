@@ -255,9 +255,17 @@ func ensureCreateScript() (string, error) {
 	return p, nil
 }
 
-// CreateTask creates a new reminder in Apple Reminders, preferring EventKit
+// CreateTask, CompleteTask and DeleteTask are the provider writes. They are
+// variables so tests can swap them and never touch the real Reminders app.
+var (
+	CreateTask   = createTask
+	CompleteTask = completeTask
+	DeleteTask   = deleteTask
+)
+
+// createTask creates a new reminder in Apple Reminders, preferring EventKit
 // so the url field actually survives the round trip (see createReminderScript).
-func CreateTask(t *models.Task) error {
+func createTask(t *models.Task) error {
 	if _, err := exec.LookPath("swift"); err == nil {
 		if script, err := ensureCreateScript(); err == nil {
 			return createViaEventKit(script, t)
@@ -320,8 +328,8 @@ end tell
 	return err
 }
 
-// CompleteTask marks a reminder as completed, searching all accounts.
-func CompleteTask(t *models.Task) error {
+// completeTask marks a reminder as completed, searching all accounts.
+func completeTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
 		listName = DefaultList()
@@ -394,13 +402,13 @@ end tell
 	return err
 }
 
-// DeleteTask deletes a reminder, searching all accounts. Returns an error
+// deleteTask deletes a reminder, searching all accounts. Returns an error
 // if no matching reminder was found anywhere — the previous version had no
 // way to signal that: the per-account `try` only guarded against a single
 // account erroring on the whose-search, and if nothing matched anywhere the
 // script just finished normally, reporting success while deleting nothing.
 // Same bug class fixed in calctl's DeleteEvent on 2026-08-01.
-func DeleteTask(t *models.Task) error {
+func deleteTask(t *models.Task) error {
 	listName := t.List
 	if listName == "" {
 		listName = DefaultList()
