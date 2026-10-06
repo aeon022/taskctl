@@ -200,6 +200,9 @@ func (m Model) rowHitTest(y int) int {
 	}
 	visible, start := m.visibleRowsWithStart(m.listHeight())
 	for localI, r := range visible {
+		if r.isHeader && localI > 0 {
+			row++ // the blank line between groups
+		}
 		if y == row {
 			if r.isHeader {
 				return -1
@@ -213,16 +216,31 @@ func (m Model) rowHitTest(y int) int {
 
 // ── Rows ──────────────────────────────────────────────────────────────────────
 
-// duePill is the due-date badge: red "overdue Oct 04", amber "today", muted
-// relative date (tomorrow, in 3d, Oct 20) for anything later.
+// duePill is the due-date badge. Only what needs attention is a pill: "overdue"
+// (red, the date after it dimmed so consecutive overdue rows don't form one
+// solid block) and "today" (amber). Anything later — tomorrow, in 3d, Oct 20,
+// 2027-01-02 — is plain dimmed text.
 func duePill(due, now time.Time) string {
 	switch {
 	case due.Before(dateutil.StartOfDay(now)):
-		return ui.Pill("overdue "+due.Format("Jan 02"), ui.Err)
+		return ui.Pill("overdue", ui.Err) + " " + styleSubhead.Render(due.Format("Jan 02"))
 	case !due.After(dateutil.EndOfDay(now)):
 		return ui.Pill("today", ui.Warn)
 	}
-	return ui.Pill(ui.RelTime(due, now), ui.Muted)
+	return styleSubhead.Render(ui.RelTime(due, now))
+}
+
+// dueColWidth is the width of the right-aligned due-date column: the widest
+// label among the current rows, so the column's left edge is straight. 0 when
+// no row has a due date.
+func (m Model) dueColWidth() int {
+	now, w := nowFn(), 0
+	for _, r := range m.rows {
+		if !r.isHeader && r.task != nil && r.task.DueDate != nil {
+			w = max(w, lipgloss.Width(duePill(*r.task.DueDate, now)))
+		}
+	}
+	return w
 }
 
 // priorityDot is the colored dot for high/medium/low (two spaces for none, so
@@ -253,11 +271,11 @@ func subtaskProgress(subs []models.Subtask) string {
 	return bar + " " + styleSubhead.Render(fmt.Sprintf("%d/%d", done, len(subs)))
 }
 
-func taskMeta(t *models.Task, now time.Time) string {
+// taskMeta is the right-hand side of a row. With dueCol > 0 the due label is
+// right-aligned in a fixed-width column at the very end (markers before it);
+// with 0 it follows the markers at its natural width.
+func taskMeta(t *models.Task, now time.Time, dueCol int) string {
 	var parts []string
-	if t.DueDate != nil {
-		parts = append(parts, duePill(*t.DueDate, now))
-	}
 	if len(t.Subtasks) > 0 {
 		parts = append(parts, subtaskProgress(t.Subtasks))
 	}
@@ -266,6 +284,16 @@ func taskMeta(t *models.Task, now time.Time) string {
 	}
 	if effectiveURL(t) != "" {
 		parts = append(parts, styleRecur.Render("↗"))
+	}
+	due := ""
+	if t.DueDate != nil {
+		due = duePill(*t.DueDate, now)
+	}
+	if dueCol > 0 {
+		due = strings.Repeat(" ", max(dueCol-lipgloss.Width(due), 0)) + due
+	}
+	if due != "" {
+		parts = append(parts, due)
 	}
 	return strings.Join(parts, " ")
 }
@@ -281,7 +309,7 @@ func groupHeader(width int, label string, count int, color string) string {
 
 // taskRow renders one task row of the given width: mark, priority dot, title
 // on the left; due pill, subtask progress, repeat and link markers on the right.
-func (m Model) taskRow(t *models.Task, selected, hovered bool, query, accent string, width int) string {
+func (m Model) taskRow(t *models.Task, selected, hovered bool, query, accent string, width, dueCol int) string {
 	var mark string
 	switch {
 	case m.selecting && m.selected[t.ID]:
@@ -304,7 +332,7 @@ func (m Model) taskRow(t *models.Task, selected, hovered bool, query, accent str
 	}
 	left := mark + " " + priorityDot(t.Priority) + title
 	text := left
-	if right := taskMeta(t, nowFn()); right != "" {
+	if right := taskMeta(t, nowFn(), dueCol); right != "" {
 		avail := max(width-2-lipgloss.Width(right)-1, 1)
 		left = ansi.Truncate(left, avail, "…")
 		text = left + strings.Repeat(" ", max(avail-lipgloss.Width(left), 0)) + " " + right
@@ -349,15 +377,22 @@ func (m Model) listLines(width, height int) []string {
 		}
 	}
 
+	dueCol := m.dueColWidth()
+	if dueCol > width/3 {
+		dueCol = 0 // too narrow for a column: labels follow the markers instead
+	}
 	var lines []string
 	visible, start := m.visibleRowsWithStart(height)
 	for localI, r := range visible {
 		i := start + localI
 		if r.isHeader {
+			if localI > 0 {
+				lines = append(lines, "") // breathing room between groups
+			}
 			lines = append(lines, groupHeader(width, r.label, counts[r.label], colors[r.label]))
 			continue
 		}
-		lines = append(lines, m.taskRow(r.task, i == m.cursor, i == m.hoverRow, query, colors[r.task.List], width))
+		lines = append(lines, m.taskRow(r.task, i == m.cursor, i == m.hoverRow, query, colors[r.task.List], width, dueCol))
 	}
 	return lines
 }
@@ -480,7 +515,11 @@ func (m Model) syncStatus() string {
 	case m.syncing:
 		return m.sp.View() + styleSubhead.Render(" syncing…")
 	case !m.lastSynced.IsZero():
-		return styleSubhead.Render("synced " + humanize.TimeAgo(m.lastSynced))
+		st := styleSubhead
+		if nowFn().Sub(m.lastSynced) > 24*time.Hour {
+			st = lipgloss.NewStyle().Foreground(theme.AmberV2) // stale data should stand out
+		}
+		return st.Render("synced " + humanize.TimeAgo(m.lastSynced))
 	}
 	return ""
 }

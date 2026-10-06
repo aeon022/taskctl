@@ -160,33 +160,44 @@ func TestDuePillStates(t *testing.T) {
 	now := time.Date(2026, 10, 6, 15, 0, 0, 0, time.Local)
 	at := func(days int, h int) time.Time { return time.Date(2026, 10, 6+days, h, 0, 0, 0, time.Local) }
 	for want, due := range map[string]time.Time{
-		" overdue Oct 04 ": at(-2, 9),
-		" overdue Oct 05 ": at(-1, 23),
+		" overdue  Oct 04": at(-2, 9),
+		" overdue  Oct 05": at(-1, 23),
 		" today ":          at(0, 8),
-		" today  ":         at(0, 8), // placeholder, replaced below
-		" tomorrow ":       at(1, 9),
-		" in 3d ":          at(3, 9),
-		" Oct 20 ":         at(14, 9),
+		"tomorrow":         at(1, 9),
+		"in 3d":            at(3, 9),
+		"Oct 20":           at(14, 9),
+		"2027-01-02":       time.Date(2027, 1, 2, 9, 0, 0, 0, time.Local),
 	} {
-		if want == " today  " {
-			continue
-		}
 		if got := ansi.Strip(duePill(due, now)); got != want {
 			t.Errorf("duePill(%v) = %q, want %q", due.Format("01-02 15h"), got, want)
 		}
 	}
-	// no due date → no pill at all
+	// only overdue and today carry a filled pill (background); later dates are plain dimmed text
+	for _, d := range []time.Time{at(1, 9), at(3, 9), at(14, 9)} {
+		if strings.Contains(duePill(d, now), "\x1b[48;") {
+			t.Errorf("a later date must not be a pill: %q", duePill(d, now))
+		}
+	}
+	// the date after "overdue" is NOT inside the pill, so consecutive overdue rows don't form a solid block
+	if p := duePill(at(-2, 9), now); strings.Count(p, "\x1b[m")+strings.Count(p, "\x1b[0m") < 2 || !strings.Contains(ansi.Strip(p), "Oct 04") {
+		t.Errorf("overdue date should be a separate dimmed segment: %q", p)
+	}
+	// no due date → no meta at all
 	task := &models.Task{ID: "n", Title: "no due"}
-	if got := ansi.Strip(taskMeta(task, now)); got != "" {
+	if got := ansi.Strip(taskMeta(task, now, 0)); got != "" {
 		t.Errorf("task without due/subtasks/repeat has no meta, got %q", got)
 	}
 	d := at(-2, 9)
 	task = &models.Task{ID: "o", Title: "late", DueDate: &d, Recurrence: "daily", Subtasks: []models.Subtask{{Done: true}, {}}}
-	got := ansi.Strip(taskMeta(task, now))
-	for _, want := range []string{"overdue Oct 04", "▰▰▱▱ 1/2", "↻ daily"} {
+	got := ansi.Strip(taskMeta(task, now, 0))
+	for _, want := range []string{"overdue", "Oct 04", "▰▰▱▱ 1/2", "↻ daily"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("meta %q missing %q", got, want)
 		}
+	}
+	// markers come first, the due label last (so the due column stays at the right edge)
+	if !(strings.Index(got, "↻ daily") < strings.Index(got, "overdue")) {
+		t.Errorf("markers must precede the due label: %q", got)
 	}
 }
 
@@ -343,5 +354,192 @@ func TestToastLineReplacesNothingBelowAndKeepsHeight(t *testing.T) {
 	m.lastDeleted = &d
 	if out := tuitest.Text(m); !strings.Contains(out, `Deleted "gone" — press u to undo`) {
 		t.Errorf("undo hint:\n%s", out)
+	}
+}
+
+func plainLines(m Model) []string {
+	var out []string
+	for _, l := range strings.Split(tuitest.Text(m), "\n") {
+		out = append(out, strings.TrimRight(l, " "))
+	}
+	return out
+}
+
+// Groups get a blank line above their header — except the very first one.
+func TestBlankLineBetweenGroupsButNotBeforeTheFirst(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel("")
+	m, _ = send(m, tea.WindowSizeMsg{Width: 100, Height: 40}, tasksLoadedMsg{tasks: manyTasks(6)})
+	lines := plainLines(m)
+	var headers []int
+	for i, l := range lines {
+		if strings.Contains(l, "── ") && (strings.Contains(l, "Home") || strings.Contains(l, "Work")) {
+			headers = append(headers, i)
+		}
+	}
+	if len(headers) != 2 {
+		t.Fatalf("want 2 group headers, got %v:\n%s", headers, strings.Join(lines, "\n"))
+	}
+	if strings.TrimSpace(lines[headers[0]-1]) == "" {
+		t.Errorf("the first group header must not be preceded by a blank line (it follows the divider):\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.TrimSpace(lines[headers[1]-1]) != "" {
+		t.Errorf("the second group header needs a blank line above it:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// The mouse lands on the right task on both sides of a group gap, and a
+// header or the gap itself is not a task.
+func TestClickMappingAcrossGroupGaps(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel("")
+	m, _ = send(m, tea.WindowSizeMsg{Width: 100, Height: 40}, tasksLoadedMsg{tasks: manyTasks(6)})
+	lines := plainLines(m)
+	for i, r := range m.rows {
+		if r.isHeader {
+			continue
+		}
+		y := -1
+		for ly, l := range lines {
+			if strings.Contains(l, r.task.Title) {
+				y = ly
+			}
+		}
+		if y < 0 {
+			t.Fatalf("%q not on screen", r.task.Title)
+		}
+		if got := m.rowHitTest(y - appPadV); got != i {
+			t.Errorf("click on %q (line %d) hit row %d, want %d", r.task.Title, y, got, i)
+		}
+	}
+	// the blank gap line and both headers resolve to no task
+	for ly, l := range lines {
+		isGap := strings.TrimSpace(l) == "" && ly > 3 && ly+1 < len(lines) && strings.Contains(lines[ly+1], "Work")
+		isHeader := strings.Contains(l, "── ") && (strings.Contains(l, "Home") || strings.Contains(l, "Work"))
+		if (isGap || isHeader) && m.rowHitTest(ly-appPadV) != -1 {
+			t.Errorf("line %d (%q) must not select a task", ly, l)
+		}
+	}
+}
+
+// A scrolled list with several groups never draws more lines than it has
+// room for, keeps the cursor row on screen, and the clicks still match.
+func TestScrollWindowWithGapsFitsAndKeepsCursorVisible(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var ts []models.Task
+	for g := 0; g < 6; g++ {
+		for i := 0; i < 4; i++ {
+			ts = append(ts, models.Task{ID: fmt.Sprintf("g%d-%d", g, i), Title: fmt.Sprintf("item-%d-%d", g, i), List: fmt.Sprintf("List%d", g), Status: "needsAction"})
+		}
+	}
+	for _, h := range []int{9, 12, 16} {
+		m := newModel("")
+		m, _ = send(m, tea.WindowSizeMsg{Width: 100, Height: h + 4}, tasksLoadedMsg{tasks: ts})
+		for step := 0; step < 40; step++ {
+			m, _ = send(m, key("j"))
+			room := m.listHeight()
+			visible, start := m.visibleRowsWithStart(room)
+			lines := 0
+			for j := range visible {
+				lines += m.rowLines(start + j)
+			}
+			if lines > room {
+				t.Fatalf("h=%d step %d: window needs %d lines, room %d", h, step, lines, room)
+			}
+			if m.cursor < start || m.cursor >= start+len(visible) {
+				t.Fatalf("h=%d step %d: cursor %d outside window [%d,%d)", h, step, m.cursor, start, start+len(visible))
+			}
+			if got := len(m.listLines(100, room)); got > room {
+				t.Fatalf("h=%d step %d: rendered %d lines for room %d", h, step, got, room)
+			}
+			if r := m.rows[m.cursor]; !r.isHeader {
+				screen := plainLines(m)
+				y := -1
+				for ly, l := range screen {
+					if strings.Contains(l, r.task.Title) {
+						y = ly
+					}
+				}
+				if y < 0 || m.rowHitTest(y-appPadV) != m.cursor {
+					t.Fatalf("h=%d step %d: cursor task %q: line %d, hit %d", h, step, r.task.Title, y, m.rowHitTest(y-appPadV))
+				}
+			}
+		}
+	}
+}
+
+// The due labels share one right-aligned column: every dated row ends at the
+// same screen column, and undated rows don't push anything around.
+func TestDueColumnIsRightAlignedAndStraight(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	now := time.Date(2026, 10, 6, 15, 0, 0, 0, time.Local)
+	fixedNow(t, now)
+	dd := func(days int) *time.Time { d := time.Date(2026, 10, 6+days, 9, 0, 0, 0, time.Local); return &d }
+	ts := []models.Task{
+		{ID: "a", Title: "alpha", List: "Home", Status: "needsAction", DueDate: dd(-3)},
+		{ID: "b", Title: "beta", List: "Home", Status: "needsAction", DueDate: dd(-2)},
+		{ID: "c", Title: "gamma", List: "Home", Status: "needsAction", DueDate: dd(0)},
+		{ID: "d", Title: "delta", List: "Home", Status: "needsAction", DueDate: dd(2)},
+		{ID: "e", Title: "epsilon", List: "Home", Status: "needsAction", DueDate: dd(120)},
+		{ID: "f", Title: "zeta undated", List: "Home", Status: "needsAction"},
+	}
+	m := newModel("")
+	m, _ = send(m, tea.WindowSizeMsg{Width: 100, Height: 24}, tasksLoadedMsg{tasks: ts})
+	col := m.dueColWidth()
+	if col == 0 {
+		t.Fatal("no due column width")
+	}
+	want := map[string]string{
+		"alpha": ansi.Strip(duePill(*dd(-3), now)), "beta": ansi.Strip(duePill(*dd(-2), now)),
+		"gamma": ansi.Strip(duePill(*dd(0), now)), "delta": ansi.Strip(duePill(*dd(2), now)),
+		"epsilon": ansi.Strip(duePill(*dd(120), now)),
+	}
+	seen := 0
+	for _, l := range strings.Split(tuitest.Text(m), "\n") {
+		for name, label := range want {
+			if !strings.Contains(l, name) {
+				continue
+			}
+			seen++
+			w := lipgloss.Width(l)
+			cell := ansi.Cut(l, w-appPadH-col, w-appPadH) // the fixed-width cell at the right edge
+			if got := strings.TrimSpace(cell); got != strings.TrimSpace(label) {
+				t.Errorf("row %q: right-edge cell is %q, want the label %q:\n%s", name, cell, label, l)
+			}
+			if lipgloss.Width(cell) != col {
+				t.Errorf("row %q: cell width %d, want the fixed column width %d", name, lipgloss.Width(cell), col)
+			}
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("found %d of %d dated rows on screen", seen, len(want))
+	}
+	text := tuitest.Text(m)
+	for _, want := range []string{"overdue", "Oct 03", "today", "in 2d"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("screen is missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestSyncAgeTurnsAmberAfterADay(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	now := time.Date(2026, 10, 6, 15, 0, 0, 0, time.Local)
+	fixedNow(t, now)
+	m := newModel("")
+	m.lastSynced = now.Add(-2 * time.Hour)
+	fresh := m.syncStatus()
+	m.lastSynced = now.Add(-48 * time.Hour)
+	stale := m.syncStatus()
+	if !strings.Contains(ansi.Strip(stale), "synced") || !strings.Contains(ansi.Strip(fresh), "synced") {
+		t.Fatalf("status lost its text: %q / %q", ansi.Strip(fresh), ansi.Strip(stale))
+	}
+	amber := lipgloss.NewStyle().Foreground(colorAmber).Render("x")
+	amberSeq := amber[:strings.Index(amber, "x")]
+	if !strings.HasPrefix(stale, amberSeq) {
+		t.Errorf("older than 24h must be amber: %q", stale)
+	}
+	if strings.HasPrefix(fresh, amberSeq) {
+		t.Errorf("a fresh sync must not be amber: %q", fresh)
 	}
 }

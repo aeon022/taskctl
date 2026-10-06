@@ -69,30 +69,52 @@ func (m Model) groupCounts() map[string]int {
 	return counts
 }
 
-// visibleRowsWithStart returns the scroll-windowed slice of m.rows that
-// keeps m.cursor in view (row-count budget, not exact lines — headers
-// spanning multiple lines get the same treatment renderList and
-// rowHitTest agree on), plus its start index into m.rows so callers can
-// map a local index back to the global one.
+// rowLines is how many screen lines row i can take: group headers after the
+// first row come with a blank line above them.
+func (m Model) rowLines(i int) int {
+	if i > 0 && m.rows[i].isHeader {
+		return 2
+	}
+	return 1
+}
+
+// visibleRowsWithStart returns the scroll-windowed slice of m.rows that keeps
+// m.cursor in view within height screen lines, plus its start index into
+// m.rows. The window grows around the cursor (below first, then above) so the
+// cursor sits roughly mid-screen; headers are budgeted at two lines (the gap),
+// so the real height never exceeds the budget (a header that ends up first in
+// the window skips its gap, leaving at most one spare line).
+// renderList, rowHitTest and the 1-9 jump all use this one window.
 func (m Model) visibleRowsWithStart(height int) ([]row, int) {
-	if len(m.rows) == 0 {
+	n := len(m.rows)
+	if n == 0 {
 		return nil, 0
 	}
-	if height < 1 {
-		height = 1
+	height = max(height, 1)
+	total := 0
+	for i := range m.rows {
+		total += m.rowLines(i)
 	}
-	start := 0
-	end := len(m.rows)
-	if end-start > height {
-		mid := m.cursor - height/2
-		if mid < 0 {
-			mid = 0
+	if total <= height {
+		return m.rows, 0
+	}
+	cur := min(max(m.cursor, 0), n-1)
+	start, end, used := cur, cur+1, m.rowLines(cur)
+	for {
+		grew := false
+		if end < n && used+m.rowLines(end) <= height {
+			used += m.rowLines(end)
+			end++
+			grew = true
 		}
-		if mid+height > end {
-			mid = end - height
+		if start > 0 && used+m.rowLines(start-1) <= height {
+			start--
+			used += m.rowLines(start)
+			grew = true
 		}
-		start = mid
-		end = start + height
+		if !grew {
+			break
+		}
 	}
 	return m.rows[start:end], start
 }
