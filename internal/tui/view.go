@@ -11,6 +11,8 @@ import (
 	"github.com/aeon022/missionctl-core/emptystate"
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
+	"github.com/aeon022/missionctl-core/statusbar"
+	"github.com/aeon022/missionctl-core/ui"
 )
 
 func (m Model) View() tea.View {
@@ -36,7 +38,7 @@ func (m Model) viewContent() string {
 	case viewCreate:
 		content = m.renderForm()
 	case viewPomodoro:
-		content = overlay.Center(m.renderList(), m.renderPomodoro(), m.width, m.height, 0)
+		content = overlay.CenterDim(m.renderList(), m.renderPomodoro(), m.width, m.height, 0)
 	case viewStats:
 		content = m.renderStats()
 	case viewHelp:
@@ -45,11 +47,35 @@ func (m Model) viewContent() string {
 		// enclosing border on the list view, so inset 0 is safe.
 		content = overlay.CenterDim(m.renderList(), m.renderHelpPopup(), m.width, m.height, 0)
 	case viewDetail:
-		content = overlay.Center(m.renderList(), m.renderDetailPopup(), m.width, m.height, 0)
+		content = overlay.CenterDim(m.renderList(), m.renderDetailPopup(), m.width, m.height, 0)
 	default:
 		content = m.renderList()
 	}
 	return lipgloss.NewStyle().Padding(appPadV, appPadH).Render(content)
+}
+
+// popup frames body in a titled ui.Panel of exactly width cells (the body is
+// wrapped to the inner width) — the one look for every modal popup.
+func popup(width int, title, body string) string {
+	body = lipgloss.NewStyle().Width(max(width-4, 1)).Render(body)
+	return ui.Panel(width, strings.Count(body, "\n")+3, title, body, true)
+}
+
+// popupWidth is the width of a modal popup: at most max cells, never wider
+// than the content area (a fixed minimum used to overflow narrow terminals).
+func (m Model) popupWidth(maxW int) int {
+	w, _ := m.dims()
+	return max(min(maxW, w), 12)
+}
+
+// chrome stacks the full-screen secondary views the same way the main list is
+// built: header, divider, blank line, body, ONE-line footer of key hints in
+// priority order (esc first), always exactly the terminal height.
+func (m Model) chrome(title, body string, hints ...[2]string) string {
+	w, h := m.dims()
+	inner := max(w-2, 0)
+	footer := "  " + statusbar.Line(inner, statusbar.Hints(inner, hints...), "")
+	return ui.Frame(h, m.renderHeader(title)+"\n"+m.renderDivider()+"\n", body, footer)
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -163,12 +189,9 @@ func (m Model) openHelp() Model {
 
 	safeH := max(6, len(bgLines))
 	popH := min(safeH, 22)
-	popW := min(70, m.width)
-	if popW < 40 {
-		popW = 40
-	}
+	popW := m.popupWidth(70)
 
-	vp := viewport.New(viewport.WithWidth(popW-6), viewport.WithHeight(popH-6)) // border 1+1, padding(1,2) → 2 rows/4 cols; -1 row for title bar, -1 for footer
+	vp := viewport.New(viewport.WithWidth(popW-4), viewport.WithHeight(popH-3)) // titled Panel: border 2 rows/cols + 1 pad col each side; 1 row for the footer
 	vp.SetContent(m.helpContent())
 
 	m.helpVP = vp
@@ -186,9 +209,7 @@ func (m Model) renderHelpPopup() string {
 	if m.helpVP.TotalLineCount() > m.helpVP.Height() {
 		footer = fmt.Sprintf("j/k scroll (%d%%)  ·  %s", int(m.helpVP.ScrollPercent()*100), footer)
 	}
-	titleBar := styleTitleBar.Width(max(0, m.helpPopW-6)).Render(" Help")
-	body := titleBar + "\n" + m.helpVP.View() + "\n" + styleSubhead.Render(footer)
-	return stylePopupBorder.Width(m.helpPopW).Render(body)
+	return popup(m.helpPopW, "Help", m.helpVP.View()+"\n"+styleSubhead.Render(footer))
 }
 
 // renderDetailPopup shows every field of the task under the cursor — the
@@ -201,16 +222,12 @@ func (m Model) renderDetailPopup() string {
 	}
 	label := func(s string) string { return styleSubhead.Render(fmt.Sprintf("%-10s", s)) }
 
-	popW := min(70, m.width)
-	if popW < 40 {
-		popW = 40
-	}
-	// inner content width: popW minus the border box's own padding+border
-	innerW := max(0, popW-6)
+	popW := m.popupWidth(70)
+	// inner content width: popW minus the Panel's border and padding
+	innerW := max(0, popW-4)
 	rule := styleSep.Render(strings.Repeat("─", innerW))
 
 	var b strings.Builder
-	b.WriteString(styleTitleBar.Width(innerW).Render(" "+t.Title) + "\n" + rule + "\n")
 	b.WriteString(label("List") + t.List + "\n")
 	status := "open"
 	if t.Done() {
@@ -272,7 +289,7 @@ func (m Model) renderDetailPopup() string {
 	}
 	b.WriteString("\n" + styleSubhead.Render(footer))
 
-	return stylePopupBorder.Width(popW).Render(b.String())
+	return popup(popW, t.Title, b.String())
 }
 
 func (m Model) renderForm() string {
@@ -282,7 +299,11 @@ func (m Model) renderForm() string {
 	}
 	var inner strings.Builder
 	for i, inp := range m.inputs {
-		inner.WriteString(styleLabel.Render(formLabels[i]) + "  " + inp.View() + "\n")
+		label := styleLabel
+		if i == m.inputIdx { // the focused field's label is accented
+			label = label.Foreground(colorBlue).Bold(true)
+		}
+		inner.WriteString(label.Render(formLabels[i]) + "  " + inp.View() + "\n")
 		// show list picker below the List field when focused
 		if i == fList && m.inputIdx == fList && len(m.listEntries) > 0 {
 			const pickerHeight = 6
@@ -324,23 +345,16 @@ func (m Model) renderForm() string {
 		inner.WriteString("\n" + styleSubhead.Render("Saving…"))
 	}
 
-	key := func(k string) string { return styleKey.Render(k) }
-	bodyLines := strings.Split(inner.String(), "\n")
 	innerW := 0
-	for _, l := range bodyLines {
+	for _, l := range strings.Split(inner.String(), "\n") {
 		if w := lipgloss.Width(l); w > innerW {
 			innerW = w
 		}
 	}
-	titleBar := styleTitleBar.Width(innerW).Render(" " + heading)
-
-	var b strings.Builder
-	b.WriteString(m.renderHeader(heading) + "\n" + m.renderDivider() + "\n\n")
-	b.WriteString(stylePopupBorder.Render(titleBar + "\n\n" + inner.String()))
-	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("  %s next  %s next/save  %s save  %s cancel\n",
-		key("tab"), key("enter"), key("ctrl+s"), key("esc")))
-	return b.String()
+	w, _ := m.dims()
+	box := popup(min(innerW+4, max(w-2, 8)), heading, inner.String())
+	return m.chrome(heading, "  "+strings.ReplaceAll(box, "\n", "\n  "),
+		[2]string{"esc", "cancel"}, [2]string{"tab", "next"}, [2]string{"enter", "next/save"}, [2]string{"ctrl+s", "save"})
 }
 
 func (m Model) renderPomodoro() string {
@@ -367,22 +381,16 @@ func (m Model) renderPomodoro() string {
 		timerStr = "Done! 🍅"
 	}
 
-	// progress bar (40 chars wide)
-	width := 40
+	// progress bar (up to 40 chars wide, narrower in a small popup)
+	width := max(min(40, m.popupWidth(56)-8), 6)
 	filled := int(float64(width) * elapsed.Seconds() / pomodoroDuration.Seconds())
 	if filled > width {
 		filled = width
 	}
 	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
 
-	popW := min(56, m.width)
-	if popW < 40 {
-		popW = 40
-	}
-	titleBar := styleTitleBar.Width(max(0, popW-6)).Render(" " + title)
-
+	popW := m.popupWidth(56)
 	var b strings.Builder
-	b.WriteString(titleBar + "\n\n")
 	b.WriteString(stylePomo.Render(timerStr) + "\n\n")
 	b.WriteString(styleSubhead.Render(bar) + "\n\n")
 	if done {
@@ -392,17 +400,16 @@ func (m Model) renderPomodoro() string {
 	}
 	b.WriteString(styleKey.Render("esc") + " / " + styleKey.Render("q") + styleSubhead.Render("  cancel"))
 
-	return stylePopupBorder.Width(popW).Render(b.String())
+	return popup(popW, title, b.String())
 }
 
 func (m Model) renderStats() string {
 	var b strings.Builder
-	b.WriteString(m.renderHeader("Stats") + "\n" + m.renderDivider() + "\n\n")
 	b.WriteString("  " + styleHeader.Render("Productivity") + "\n\n")
 
 	if m.statsData == nil {
 		b.WriteString("  Loading…\n")
-		return b.String()
+		return m.chrome("Stats", b.String(), [2]string{"esc", "back"})
 	}
 
 	st := m.statsData
@@ -418,9 +425,7 @@ func (m Model) renderStats() string {
 		to := time.Now().Format("Jan 02")
 		b.WriteString("  " + styleSubhead.Render(from+" – "+to) + "\n")
 	}
-
-	b.WriteString("\n  " + styleSubhead.Render("any key to close") + "\n")
-	return b.String()
+	return m.chrome("Stats", b.String(), [2]string{"esc", "back"}, [2]string{"any key", "close"})
 }
 
 func sparkline(counts []int) string {

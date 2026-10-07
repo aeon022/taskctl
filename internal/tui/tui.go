@@ -45,12 +45,12 @@ const (
 	fCount      = 6
 )
 
-var formLabels = [fCount]string{"Title", "List", "Due", "Notes", "URL", "Repeat (daily/weekly/monthly)"}
+var formLabels = [fCount]string{"Title", "List", "Due", "Notes", "URL", "Repeat"}
 
 // formLabelWidth is styleLabel's fixed width; the list-picker rows below
 // the List field indent past it (+2 for the "  " separator) to line up
 // under the field's value column instead of its label.
-const formLabelWidth = 28
+const formLabelWidth = 10
 
 const pomodoroDuration = 25 * time.Minute
 const doubleClickWindow = 400 * time.Millisecond
