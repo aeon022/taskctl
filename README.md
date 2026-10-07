@@ -52,9 +52,9 @@ Local-first task manager for macOS. Syncs with Apple Reminders via EventKit. Par
 |-----|--------|
 | `j` / `k` or arrow keys | Navigate |
 | `space` | Toggle done (grayed out, removed on next sync) |
-| `enter` / `ctrl+d` | Mark done |
+| `enter` | Task details popup (subtasks, notes) |
 | `n` | New task (form) |
-| `i` | Inline quick-add |
+| `1`–`9` | Jump to the nth visible task |
 | `e` | Edit selected task |
 | `d` | Delete (confirm with `y`) |
 | `u` | Undo last delete |
@@ -66,10 +66,15 @@ Local-first task manager for macOS. Syncs with Apple Reminders via EventKit. Par
 | `f` | Filter by list or priority (`l`, `p`; `x` clears everything) |
 | `x` / `esc` | Clear the view tab and all filters |
 | `h` / `←` | Focus the Lists sidebar (terminal ≥ 140 columns) |
-| `v` | Stats view |
+| `O` | Overdue only |
+| `i` | Stats view |
+| `v` | Select mode (batch) |
 | `p` | Start Pomodoro (25 min) |
+| `y` | Copy title to clipboard |
+| `o` | Open the task's URL |
 | `/` | Search |
-| `A` | Enter batch mode |
+| `:` | Command palette |
+| `?` | Help |
 | `q` | Quit |
 
 ---
@@ -240,10 +245,9 @@ Start the TUI with `taskctl` (no subcommand).
 | `j` / `k` | Move cursor down / up |
 | `↑` / `↓` | Move cursor up / down |
 | `space` | Toggle done — grays the task out locally; removed from list on next sync |
-| `enter` | Mark done |
-| `ctrl+d` | Mark done |
+| `enter` | Open the task details popup |
 | `n` | Open new task form |
-| `i` | Inline quick-add — type a title and press enter |
+| `1`–`9` | Jump to the nth visible task |
 | `e` | Edit selected task in form |
 | `d` | Delete selected task (prompts `y` to confirm) |
 | `u` | Undo the last delete |
@@ -255,10 +259,15 @@ Start the TUI with `taskctl` (no subcommand).
 | `f` | Open the filter menu (see below) |
 | `x` / `esc` | Clear the view tab, chips and the focus/overdue filter |
 | `h` / `←` | Move into the Lists sidebar (≥ 140 columns) |
-| `v` | Open stats view |
+| `i` | Open stats view |
+| `v` | Select mode: `space` marks, `A` selects all, `enter`/`ctrl+d` completes, `d` deletes the selection |
+| `O` | Overdue only |
+| `y` | Copy title to clipboard |
+| `o` | Open the task's URL |
+| `:` | Command palette |
+| `?` | Help |
 | `p` | Start a 25-minute Pomodoro timer (shown in header; notification on completion) |
 | `/` | Search tasks by title |
-| `A` | Enter batch mode |
 | `q` | Quit |
 
 ### Views, filters and the Lists sidebar
