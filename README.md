@@ -309,7 +309,7 @@ filter state is not remembered between runs.
 
 ### Batch Mode
 
-Activate with `A` from the main list.
+Activate with `v` from the main list.
 
 | Key | Action |
 |-----|--------|
