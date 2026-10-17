@@ -375,7 +375,7 @@ func (m Model) listLines(width, height int) []string {
 		case m.filter == filterOverdue:
 			title, hint = "No overdue tasks", "press O to show all tasks"
 		case len(m.tasks) == 0:
-			title, hint = "No tasks yet", "press n to add one, or s to sync with Apple Reminders"
+			title, hint = "Welcome to taskctl", m.onboardingChecklist()
 		default:
 			title = "No tasks found"
 		}
@@ -585,4 +585,20 @@ func (m Model) renderStatusBar() string {
 	}
 	hints := statusbar.Hints(room, pairs...)
 	return "  " + statusbar.Line(inner, hints, right)
+}
+
+// onboardingChecklist is the first-run hint of an empty task list: what to try, with the finished step ticked.
+func (m Model) onboardingChecklist() string {
+	box := func(done bool) string {
+		if done {
+			return "✓"
+		}
+		return "○"
+	}
+	return strings.Join([]string{
+		box(!m.lastSynced.IsZero()) + "  s   sync with Apple Reminders (macOS asks for access the first time)",
+		box(false) + "  n   add your first task",
+		box(false) + "  :   open the command palette — type a word instead of remembering keys",
+		box(false) + "  T   pick a colour theme (saved for the whole suite)",
+	}, "\n")
 }

@@ -61,6 +61,7 @@ Local-first task manager for macOS. Syncs with Apple Reminders via EventKit. Par
 | `S` | Postpone to tomorrow |
 | `s` | Sync with Apple Reminders |
 | `t` | Focus mode — today and overdue only |
+| `T` | Next colour theme — switches live and is saved for the whole suite |
 | `c` | Done view (completed tasks) — press again to go back to All |
 | `tab` / `]` · `shift+tab` / `[` | Next / previous view: All · Today · Overdue · Next 7 days · No date · Done |
 | `f` | Filter by list or priority (`l`, `p`; `x` clears everything) |
@@ -254,6 +255,7 @@ Start the TUI with `taskctl` (no subcommand).
 | `S` | Postpone selected task to tomorrow |
 | `s` | Sync with Apple Reminders |
 | `t` | Toggle focus mode — shows only today and overdue tasks |
+| `T` | Cycle the colour theme live (dracula, nord, …); saved to `~/.config/missionctl/theme.yaml` for every suite tool |
 | `c` | Done view — shows only completed tasks; `c` again returns to All |
 | `tab` / `]`, `shift+tab` / `[` | Cycle the view tabs (see below) |
 | `f` | Open the filter menu (see below) |

@@ -154,6 +154,7 @@ func (m Model) helpContent() string {
 		Row("/", "search tasks (esc clears)").
 		Row(":", "command palette — type an action by name").
 		Row("t", "focus mode — today & overdue only").
+		Row("T", "next colour theme (saved for the whole suite)").
 		Row("O", "filter — overdue only").
 		Row("c", "Done view — show / hide completed tasks").
 		Row("tab / ] / [", "next / previous view: All · Today · Overdue · Next 7 days · No date · Done").

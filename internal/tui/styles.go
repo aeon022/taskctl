@@ -8,43 +8,51 @@ import (
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/aeon022/missionctl-core/uistate"
 	"github.com/aeon022/taskctl/internal/config"
+	"image/color"
 )
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	// Shared across the suite via missionctl-core/theme.
-	colorBlue   = theme.BlueV2
-	colorGreen  = theme.GreenV2
-	colorRed    = theme.RedV2
-	colorAmber  = theme.AmberV2
-	colorMuted  = theme.MutedV2
-	colorSubtle = theme.SubtleV2
+	// Shared across the suite via missionctl-core/theme. Rebuilt by refreshStyles when the theme changes.
+	colorBlue, colorGreen, colorRed, colorAmber, colorMuted, colorSubtle color.Color
 
-	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	styleHeader, styleSubhead, styleSep, styleDone, styleTitle, styleDue, styleToday, styleOverdue, styleCursor lipgloss.Style
+	styleKey, styleLabel, styleErr, styleRecur, stylePomo, styleStats, styleUrgent, styleImportant              lipgloss.Style
+	styleSelected, styleFocusBadge, styleCountBadge                                                             lipgloss.Style
+)
+
+func init() {
+	refreshStyles()
+	theme.OnChange(refreshStyles)
+}
+
+// refreshStyles builds every cached colour and style from the active theme (live theme switching).
+func refreshStyles() {
+	colorBlue, colorGreen, colorRed = theme.BlueV2, theme.GreenV2, theme.RedV2
+	colorAmber, colorMuted, colorSubtle = theme.AmberV2, theme.MutedV2, theme.SubtleV2
+
+	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	styleSubhead = lipgloss.NewStyle().Foreground(colorMuted)
-	styleSep     = lipgloss.NewStyle().Foreground(colorSubtle)
-	styleDone    = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
-	styleTitle   = lipgloss.NewStyle()
-	styleDue     = lipgloss.NewStyle().Foreground(colorAmber)
-	styleToday   = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
+	styleSep = lipgloss.NewStyle().Foreground(colorSubtle)
+	styleDone = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
+	styleTitle = lipgloss.NewStyle()
+	styleDue = lipgloss.NewStyle().Foreground(colorAmber)
+	styleToday = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
 	styleOverdue = lipgloss.NewStyle().Foreground(colorRed)
-	styleCursor  = lipgloss.NewStyle().
-			Background(theme.SelectedBgV2).
-			Foreground(theme.SelectedFgV2).
-			Bold(true)
-	styleKey        = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
-	styleLabel      = lipgloss.NewStyle().Foreground(colorMuted).Width(formLabelWidth)
-	styleErr        = lipgloss.NewStyle().Foreground(colorRed)
-	styleRecur      = lipgloss.NewStyle().Foreground(colorGreen)
-	stylePomo       = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
-	styleStats      = lipgloss.NewStyle().Foreground(colorBlue)
-	styleUrgent     = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
-	styleImportant  = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
-	styleSelected   = lipgloss.NewStyle().Foreground(colorGreen)
+	styleCursor = lipgloss.NewStyle().Background(theme.SelectedBgV2).Foreground(theme.SelectedFgV2).Bold(true)
+	styleKey = lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+	styleLabel = lipgloss.NewStyle().Foreground(colorMuted).Width(formLabelWidth)
+	styleErr = lipgloss.NewStyle().Foreground(colorRed)
+	styleRecur = lipgloss.NewStyle().Foreground(colorGreen)
+	stylePomo = lipgloss.NewStyle().Bold(true).Foreground(colorAmber)
+	styleStats = lipgloss.NewStyle().Foreground(colorBlue)
+	styleUrgent = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+	styleImportant = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+	styleSelected = lipgloss.NewStyle().Foreground(colorGreen)
 	styleFocusBadge = lipgloss.NewStyle().Background(colorRed).Foreground(theme.SelectedFgV2).Padding(0, 1)
 	styleCountBadge = lipgloss.NewStyle().Foreground(colorMuted).Background(theme.HoverBgV2).Padding(0, 1)
-)
+}
 
 // ── command palette (":") ────────────────────────────────────────────────────
 //
@@ -73,6 +81,7 @@ var paletteCommands = []palette.Command{
 	{Name: "select", Desc: "Select mode (batch actions)", Key: "v"},
 	{Name: "pomodoro", Desc: "Pomodoro timer for selected task", Key: "p"},
 	{Name: "stats", Desc: "Stats", Key: "i"},
+	{Name: "theme", Desc: "Next colour theme (saved for the whole suite)", Key: "T"},
 	{Name: "sync", Desc: "Sync with Apple Reminders", Key: "s"},
 	{Name: "help", Desc: "Show help", Key: "?"},
 	{Name: "quit", Desc: "Quit taskctl", Key: "q"},

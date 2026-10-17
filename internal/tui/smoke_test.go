@@ -38,7 +38,7 @@ func TestSmokeEmptyData(t *testing.T) {
 	m := newModel("")
 	m2, _ := tuitest.Send(m, tea.WindowSizeMsg{Width: 100, Height: 30}, tasksLoadedMsg{})
 	tuitest.Smoke(t, m2, smokeKeys...)
-	if out := tuitest.Text(m2); !strings.Contains(out, "No tasks yet") || !strings.Contains(out, "press n to add one") {
+	if out := tuitest.Text(m2); !strings.Contains(out, "Welcome to taskctl") || !strings.Contains(out, "add your first task") {
 		t.Errorf("empty list should show the empty state with its hint:\n%s", out)
 	}
 }

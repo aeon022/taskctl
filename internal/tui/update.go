@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/aeon022/missionctl-core/theme"
 	"sort"
 	"strings"
 	"time"
@@ -704,6 +705,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		return m.setTab(tabDone)
 
+	case "T": // live theme switch; the choice is saved for every suite tool
+		return m.cycleTheme()
+
 	case "t":
 		if m.filter == filterFocus {
 			m.filter = filterNone
@@ -846,3 +850,23 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 // Mouse Y coordinates need the same offset subtracted; see the
 // tea.MouseMsg case in Update.
 const appPadV, appPadH = 1, 2
+
+// cycleTheme switches to the next built-in colour theme right away and saves it for the whole suite.
+func (m Model) cycleTheme() (Model, tea.Cmd) {
+	names := theme.Presets()
+	next := names[0]
+	for i, n := range names {
+		if n == theme.Current() {
+			next = names[(i+1)%len(names)]
+			break
+		}
+	}
+	if err := theme.Apply(next); err != nil {
+		m.flash = "Theme: " + err.Error()
+		return m, clearFlashCmd(m.flash)
+	}
+	_ = theme.Save(next)
+	m.sp.Style = styleSubhead
+	m.flash = "Theme: " + next
+	return m, clearFlashCmd(m.flash)
+}

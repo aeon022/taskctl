@@ -330,7 +330,7 @@ func TestEmptyStateInBothLayouts(t *testing.T) {
 		m := newModel("")
 		m, _ = send(m, tea.WindowSizeMsg{Width: w, Height: 30}, tasksLoadedMsg{})
 		out := tuitest.Text(m)
-		if !strings.Contains(out, "No tasks yet") || !strings.Contains(out, "0 open") {
+		if !strings.Contains(out, "Welcome to taskctl") || !strings.Contains(out, "0 open") {
 			t.Errorf("width %d empty state / header:\n%s", w, out)
 		}
 		if w >= wideMin && !strings.Contains(out, "This week") {
