@@ -26,7 +26,7 @@ func Serve() error {
 	s.AddTool(toolSync(), handleSync)
 	s.AddTool(toolCreateTask(), handleCreateTask)
 	s.AddTool(toolCompleteTask(), handleCompleteTask)
-	s.AddTool(toolDeleteTask(), handleDeleteTask)
+	s.AddTool(toolDeleteTask(), confirmed(handleDeleteTask))
 	return server.ServeStdio(s)
 }
 
@@ -80,6 +80,7 @@ func toolCompleteTask() mcp.Tool {
 
 func toolDeleteTask() mcp.Tool {
 	return mcp.NewTool("delete_task",
+		confirmParam,
 		mcp.WithDescription("Delete a task from Apple Reminders. Use list_tasks first to confirm the exact title."),
 		mcp.WithString("title", mcp.Required(), mcp.Description("Exact task title")),
 		mcp.WithString("list", mcp.Description("Reminder list name")),

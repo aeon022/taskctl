@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/aeon022/missionctl-core/activity"
+	"github.com/aeon022/missionctl-core/applescript"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -424,7 +425,9 @@ func notifyPomodoro(t *models.Task) {
 	if t != nil {
 		msg = fmt.Sprintf("Done: %s", t.Title)
 	}
-	script := fmt.Sprintf(`display notification "%s" with title "%s" sound name "Glass"`, msg, title)
+	// msg contains the task title (it can come from a shared Reminders list): escape it, an unescaped
+	// quote would let a title run arbitrary AppleScript (do shell script).
+	script := fmt.Sprintf(`display notification "%s" with title "%s" sound name "Glass"`, applescript.EscapeLine(msg), applescript.EscapeLine(title))
 	_ = exec.Command("osascript", "-e", script).Run()
 }
 
