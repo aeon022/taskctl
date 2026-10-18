@@ -50,3 +50,12 @@ func TestOnboardingTicksTheSyncStep(t *testing.T) {
 		t.Errorf("after a sync the step is ticked:\n%s", out)
 	}
 }
+
+func TestDoneTabCountIsKnownBeforeOpeningIt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel("")
+	m, _ = send(m, tea.WindowSizeMsg{Width: 120, Height: 30}, tasksLoadedMsg{doneTotal: 7})
+	if got := m.tabCounts()[tabDone]; got != 7 {
+		t.Errorf("Done tab count before opening it = %d, want 7", got)
+	}
+}

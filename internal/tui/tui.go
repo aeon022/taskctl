@@ -57,7 +57,10 @@ const doubleClickWindow = 400 * time.Millisecond
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type tasksLoadedMsg struct{ tasks []models.Task }
+type tasksLoadedMsg struct {
+	tasks     []models.Task
+	doneTotal int // completed tasks in the store; only set while the Done tab is not loaded (else counted from tasks)
+}
 type syncDoneMsg struct {
 	tasks []models.Task
 	err   error
@@ -116,6 +119,7 @@ type Model struct {
 	loading      bool
 	syncing      bool
 	lastLoad     time.Time // when tasks last arrived; FocusMsg reloads only if stale
+	doneTotal    int       // completed tasks in the store (tab count while the Done tab is not loaded)
 	focusLoading bool      // a focus-triggered reload is in flight (keeps cursor, no spinner)
 	lastSynced   time.Time // zero = never synced this install
 	sp           spinner.Model

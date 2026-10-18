@@ -68,6 +68,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusLoading = false
 		m.lastLoad = time.Now()
 		m.tasks = msg.tasks
+		m.doneTotal = msg.doneTotal
 		m.rows = m.rebuildRows()
 		m.loading = false
 		m.cursor = firstTaskRow(m.rows)

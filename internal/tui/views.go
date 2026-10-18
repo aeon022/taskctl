@@ -128,6 +128,9 @@ func (m Model) tabCounts() []int {
 			}
 		}
 	}
+	if !m.showDone && counts[tabDone] == 0 {
+		counts[tabDone] = m.doneTotal // completed tasks aren't loaded until the Done tab opens; the store knows the number
+	}
 	return counts
 }
 

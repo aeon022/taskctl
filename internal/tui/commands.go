@@ -67,7 +67,16 @@ func loadTasks(showDone bool) tea.Cmd {
 			status = ""
 		}
 		tasks, _ := s.ListTasks(ctx, store.ListFilter{Status: status})
-		return tasksLoadedMsg{tasks}
+		doneTotal := 0
+		if !showDone { // the Done tab's number must be right before it is first opened
+			all, _ := s.ListTasks(ctx, store.ListFilter{})
+			for i := range all {
+				if all[i].Done() {
+					doneTotal++
+				}
+			}
+		}
+		return tasksLoadedMsg{tasks: tasks, doneTotal: doneTotal}
 	}
 }
 
