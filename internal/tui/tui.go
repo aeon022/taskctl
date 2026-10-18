@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
+	"github.com/aeon022/missionctl-core/themepicker"
 	"github.com/aeon022/taskctl/internal/models"
 )
 
@@ -118,10 +119,11 @@ type Model struct {
 	view         view
 	loading      bool
 	syncing      bool
-	lastLoad     time.Time // when tasks last arrived; FocusMsg reloads only if stale
-	doneTotal    int       // completed tasks in the store (tab count while the Done tab is not loaded)
-	focusLoading bool      // a focus-triggered reload is in flight (keeps cursor, no spinner)
-	lastSynced   time.Time // zero = never synced this install
+	lastLoad     time.Time          // when tasks last arrived; FocusMsg reloads only if stale
+	themePicker  themepicker.Picker // the "T" popup
+	doneTotal    int                // completed tasks in the store (tab count while the Done tab is not loaded)
+	focusLoading bool               // a focus-triggered reload is in flight (keeps cursor, no spinner)
+	lastSynced   time.Time          // zero = never synced this install
 	sp           spinner.Model
 	showDone     bool
 	err          error

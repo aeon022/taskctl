@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"github.com/aeon022/missionctl-core/theme"
 	"sort"
 	"strings"
 	"time"
@@ -310,6 +309,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.themePicker.IsOpen() { // the "T" popup owns the keyboard while it is open
+		if text := m.themePicker.Key(msg.String()); text != "" {
+			m.sp.Style = styleSubhead
+			m.flash = text
+			return m, clearFlashCmd(m.flash)
+		}
+		return m, nil
+	}
 	// ── pomodoro view ─────────────────────────────────────────────────────
 	if m.view == viewPomodoro {
 		switch msg.String() {
@@ -706,8 +713,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		return m.setTab(tabDone)
 
-	case "T": // live theme switch; the choice is saved for every suite tool
-		return m.cycleTheme()
+	case "T": // theme picker with live preview; the choice is saved for every suite tool
+		m.themePicker.Open()
+		return m, nil
 
 	case "t":
 		if m.filter == filterFocus {
@@ -851,15 +859,3 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 // Mouse Y coordinates need the same offset subtracted; see the
 // tea.MouseMsg case in Update.
 const appPadV, appPadH = 1, 2
-
-// cycleTheme switches to the next built-in colour theme right away and saves it for the whole suite.
-func (m Model) cycleTheme() (Model, tea.Cmd) {
-	name, err := theme.Cycle()
-	if err != nil {
-		m.flash = "Theme: " + err.Error()
-	} else {
-		m.sp.Style = styleSubhead
-		m.flash = "Theme: " + name
-	}
-	return m, clearFlashCmd(m.flash)
-}

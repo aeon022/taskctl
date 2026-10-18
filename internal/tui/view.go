@@ -16,7 +16,11 @@ import (
 )
 
 func (m Model) View() tea.View {
-	v := tea.NewView(m.viewContent())
+	content := m.viewContent()
+	if m.themePicker.IsOpen() { // not dimmed: the live preview behind the popup is the point
+		content = overlay.Center(content, m.themePicker.View(), m.width, m.height, 0)
+	}
+	v := tea.NewView(content)
 	// v1's tea.WithAltScreen()/WithMouseAllMotion() Program options are gone
 	// in v2 — they are per-View fields now.
 	v.AltScreen = true
@@ -154,7 +158,7 @@ func (m Model) helpContent() string {
 		Row("/", "search tasks (esc clears)").
 		Row(":", "command palette — type an action by name").
 		Row("t", "focus mode — today & overdue only").
-		Row("T", "next colour theme (saved for the whole suite)").
+		Row("T", "colour theme picker with live preview (saved for the whole suite)").
 		Row("O", "filter — overdue only").
 		Row("c", "Done view — show / hide completed tasks").
 		Row("tab / ] / [", "next / previous view: All · Today · Overdue · Next 7 days · No date · Done").

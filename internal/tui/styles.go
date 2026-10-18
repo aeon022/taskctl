@@ -81,7 +81,7 @@ var paletteCommands = []palette.Command{
 	{Name: "select", Desc: "Select mode (batch actions)", Key: "v"},
 	{Name: "pomodoro", Desc: "Pomodoro timer for selected task", Key: "p"},
 	{Name: "stats", Desc: "Stats", Key: "i"},
-	{Name: "theme", Desc: "Next colour theme (saved for the whole suite)", Key: "T"},
+	{Name: "theme", Desc: "Colour theme picker with live preview (saved for the whole suite)", Key: "T"},
 	{Name: "sync", Desc: "Sync with Apple Reminders", Key: "s"},
 	{Name: "help", Desc: "Show help", Key: "?"},
 	{Name: "quit", Desc: "Quit taskctl", Key: "q"},

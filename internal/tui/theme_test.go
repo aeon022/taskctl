@@ -12,7 +12,7 @@ import (
 	"github.com/aeon022/missionctl-core/tuitest"
 )
 
-func TestThemeKeySwitchesLiveAndSaves(t *testing.T) {
+func TestThemeKeyOpensPickerWithLivePreviewAndSaves(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	orig := theme.Current()
@@ -20,17 +20,18 @@ func TestThemeKeySwitchesLiveAndSaves(t *testing.T) {
 
 	m := newModel("")
 	m, _ = send(m, tea.WindowSizeMsg{Width: 100, Height: 30}, tasksLoadedMsg{})
-	before := styleHeader.GetForeground()
 	m, _ = send(m, tuitest.Key("T"))
-
-	if theme.Current() == orig {
-		t.Fatalf("T must switch to the next theme, still %q", orig)
+	if !strings.Contains(tuitest.Text(m), "Colour theme") {
+		t.Fatalf("T opens the theme popup:\n%s", tuitest.Text(m))
 	}
-	if styleHeader.GetForeground() == before {
-		t.Error("cached styles must be rebuilt when the theme changes")
+	before := styleHeader.GetForeground()
+	m, _ = send(m, tuitest.Key("j"))
+	if theme.Current() == orig || styleHeader.GetForeground() == before {
+		t.Error("moving in the popup previews the theme live and rebuilds the cached styles")
 	}
-	if !strings.Contains(tuitest.Text(m), "Theme: "+theme.Current()) {
-		t.Errorf("a short confirmation should name the theme:\n%s", tuitest.Text(m))
+	m, _ = send(m, tuitest.Key("enter"))
+	if strings.Contains(tuitest.Text(m), "Colour theme") || !strings.Contains(tuitest.Text(m), "Theme: "+theme.Current()) {
+		t.Errorf("enter closes the popup and confirms the theme:\n%s", tuitest.Text(m))
 	}
 	b, err := os.ReadFile(filepath.Join(home, ".config", "missionctl", "theme.yaml"))
 	if err != nil || !strings.Contains(string(b), "preset: "+theme.Current()) {
