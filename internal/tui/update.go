@@ -853,20 +853,12 @@ const appPadV, appPadH = 1, 2
 
 // cycleTheme switches to the next built-in colour theme right away and saves it for the whole suite.
 func (m Model) cycleTheme() (Model, tea.Cmd) {
-	names := theme.Presets()
-	next := names[0]
-	for i, n := range names {
-		if n == theme.Current() {
-			next = names[(i+1)%len(names)]
-			break
-		}
-	}
-	if err := theme.Apply(next); err != nil {
+	name, err := theme.Cycle()
+	if err != nil {
 		m.flash = "Theme: " + err.Error()
-		return m, clearFlashCmd(m.flash)
+	} else {
+		m.sp.Style = styleSubhead
+		m.flash = "Theme: " + name
 	}
-	_ = theme.Save(next)
-	m.sp.Style = styleSubhead
-	m.flash = "Theme: " + next
 	return m, clearFlashCmd(m.flash)
 }
