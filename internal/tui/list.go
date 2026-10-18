@@ -596,9 +596,9 @@ func (m Model) onboardingChecklist() string {
 		return "○"
 	}
 	return strings.Join([]string{
-		box(!m.lastSynced.IsZero()) + "  s   sync with Apple Reminders (macOS asks for access the first time)",
+		box(!m.lastSynced.IsZero()) + "  s   sync with Apple Reminders",
 		box(false) + "  n   add your first task",
-		box(false) + "  :   open the command palette — type a word instead of remembering keys",
-		box(false) + "  T   pick a colour theme (saved for the whole suite)",
+		box(false) + "  :   open the command palette",
+		box(false) + "  T   pick a colour theme",
 	}, "\n")
 }
