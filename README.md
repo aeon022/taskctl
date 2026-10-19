@@ -2,6 +2,16 @@
 
 Local-first task manager for macOS. Syncs with Apple Reminders via EventKit. Part of the missionctl suite.
 
+![taskctl demo](docs/demo.gif)
+
+**Install**
+
+```bash
+brew install aeon022/tap/taskctl
+```
+
+Prebuilt binaries for macOS and Linux (arm64, amd64) are on the [Releases](https://github.com/aeon022/taskctl/releases) page. Questions: see [SUPPORT.md](SUPPORT.md).
+
 ---
 
 ## Quick Start
