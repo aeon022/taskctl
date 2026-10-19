@@ -99,7 +99,7 @@ func TestParseNextWeekday(t *testing.T) {
 		if !got.After(today()) {
 			t.Errorf("Parse(%q) = %v — must be in the future", in, got)
 		}
-		if got.Sub(today()) > 7*24*time.Hour {
+		if got.After(today().AddDate(0, 0, 7)) { // calendar days, not 7*24h: a DST change in between shifts the hour
 			t.Errorf("Parse(%q) = %v — more than a week away", in, got)
 		}
 	}
