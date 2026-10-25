@@ -79,3 +79,6 @@ echo "────────────────────────�
 echo "Done. Run:"
 echo "  taskctl sync    # first sync (macOS will ask for Reminders access)"
 echo "  taskctl         # open TUI"
+
+# man pages (best effort): man taskctl
+mkdir -p "$HOME/.local/share/man/man1" && "${INSTALL_DIR:-$HOME/.local/bin}/taskctl" man "$HOME/.local/share/man/man1" >/dev/null 2>&1 || true
